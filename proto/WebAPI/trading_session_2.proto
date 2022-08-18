@@ -1,0 +1,232 @@
+// Trading session related messages
+
+syntax = "proto2";
+
+package trading_session_2;
+
+// Request for session information per instrument group.
+message SessionInformationRequest
+{
+  // ID of a session information from contract meta-data.
+  required sint32 session_info_id = 1;
+
+  // UTC time from which session information is requested (e.g. if historical session times are necessary).
+  // Current time is used by default.
+  optional sint64 from_utc_time = 2;
+
+  // UTC time up to which session information is requested (e.g. if future session times are necessary).
+  // Current time is used by default. This field must not be used with subscriptions.
+  optional sint64 to_utc_time = 3;
+}
+
+// Report with session information.
+message SessionInformationReport
+{
+  // Session information ID.
+  required sint32 session_info_id = 1;
+
+  // List of session segment records.
+  repeated SessionSegment session_segments = 2;
+}
+
+// Session segment record.
+message SessionSegment
+{
+  // Session segment ID useful for updates.
+  required sint64 session_segment_id = 1;
+
+  // Session group is deleted (used for updates).
+  optional bool deleted = 2;
+
+  // UTC time from which this session information is effective (inclusive).
+  // It is omitted if this session information was the same since Instrument group was introduced.
+  optional sint64 from_utc_time = 3;
+
+  // UTC time up to which this session information is effective (exclusive).
+  // It is omitted if this session information is not planned yet to be changed.
+  optional sint64 to_utc_time = 4;
+
+  // Schedule for all sessions.
+  repeated SessionSchedule session_schedules = 5;
+
+  // Trading day schedule.
+  repeated TradingDay trading_days = 6;
+
+  // Daily holidays. May have some sessions interday, but daily bar is not created.
+  repeated SessionHoliday daily_holidays = 7;
+}
+
+// Session schedule.
+message SessionSchedule
+{
+  // Session name.
+  required string name = 1;
+
+  // List of session times per day of week.
+  repeated SessionDay session_days = 2;
+
+  // List of exchange specific dates when this session is closed.
+  repeated SessionHoliday session_holidays = 3;
+
+  // True if this is a primary session.
+  optional bool is_primary = 4;
+}
+
+// Days of week enumeration.
+enum DayOfWeek
+{
+  DAY_OF_WEEK_SUNDAY = 0;
+  DAY_OF_WEEK_MONDAY = 1;
+  DAY_OF_WEEK_TUESDAY = 2;
+  DAY_OF_WEEK_WEDNESDAY = 3;
+  DAY_OF_WEEK_THURSDAY = 4;
+  DAY_OF_WEEK_FRIDAY = 5;
+  DAY_OF_WEEK_SATURDAY = 6;
+}
+
+// Trading day schedule.
+message TradingDay
+{
+  // Days of week list with the same day schedule.
+  repeated DayOfWeek days_of_week = 1;
+
+  // Trading day start offset in milliseconds from 00:00 UTC.
+  optional sint64 start_offset = 2;
+}
+
+// Session times per day of week.
+// All time offsets are in milliseconds from 00:00 UTC time of a specific date that corresponds to specific day of week.
+// Offset values are optional and can be positive and negative
+// (e.g. session can be completely 'pre-open' so only pre_open_offset and post_close_offset values are set).
+// NOTE: Session times may not match exact exchange schedule especially if exchange have dynamic times
+// (e.g. session starts after publishing a settlement, after underlying contract trade, etc.)
+// or if exchange sends market data outside of session boundaries (e.g. late trades)
+message SessionDay
+{
+  // Days of week list with the same day schedule.
+  repeated DayOfWeek days_of_week = 1;
+
+  // Session pre-open time offset.
+  optional sint64 pre_open_offset = 2;
+
+  // Session open time offset.
+  optional sint64 open_offset = 3;
+
+  // Session close time offset.
+  optional sint64 close_offset = 4;
+
+  // Session post-close time offset.
+  optional sint64 post_close_offset = 5;
+}
+
+// Session holiday record.
+message SessionHoliday
+{
+  // Date of a holiday.
+  required sint64 holiday_date = 1;
+
+  // Name of a holiday.
+  required string holiday_name = 2;
+}
+
+// Request for session open/close times.
+message SessionTimeRangeRequest
+{
+  // ID of a session information from contract meta-data.
+  required sint32 session_info_id = 1;
+
+  // Exactly two of the next three fields have to be set:
+  // UTC time of start of the time range to get information for.
+  // Sessions with post-close time > from_utc_time are returned.
+  optional sint64 from_utc_time = 2;
+
+  // UTC time of end of the time range to get information for.
+  // Sessions with pre-open time < to_utc_time are returned.
+  optional sint64 to_utc_time = 3;
+
+  // Number of session timeranges to return.
+  // If used with from_utc_time then it is the number of timeranges to return starting from that time.
+  // If used with to_utc_time then it is the number of timeranges to return preceding that time.
+  optional uint32 count = 4;
+}
+
+// This may come in multiple chunks if many items are reported.
+message SessionTimeRangeReport
+{
+  // Session open/close times.
+  repeated SessionTimeRange session_time_ranges = 1;
+
+  // Request was done for the range that was too long, so it was truncated.
+  optional bool truncated = 2;
+}
+
+// Session open/close times and trading day date.
+message SessionTimeRange
+{
+  // UTC time of session pre-open.
+  required sint64 pre_open_utc_time = 1;
+
+  // UTC time of session open.
+  required sint64 open_utc_time = 2;
+
+  // UTC time of session close.
+  required sint64 close_utc_time = 3;
+
+  // UTC time of session post close.
+  required sint64 post_close_utc_time = 4;
+
+  // Trading date the session belongs to, local to exchange, time part is not used (set to 00:00).
+  required sint64 trade_date = 5;
+
+  // Session name.
+  required string session_name = 6;
+}
+
+// Request for trading day open/close times.
+message TradingDayTimeRangeRequest
+{
+  // ID of a session information from contract meta-data.
+  required sint32 session_info_id = 1;
+
+  // True if holidays should be included in the response.
+  optional bool include_holidays  = 2;
+
+  // Exactly two of the next three fields have to be set:
+  // UTC time of start of the time range to get information for.
+  // Trading days with end time > from_utc_time are returned.
+  optional sint64 from_utc_time = 3;
+
+  // UTC time of end of the time range to get information for.
+  // Trading days with start time < to_utc_time are returned.
+  optional sint64 to_utc_time = 4;
+
+  // Number of trading day timeranges to return.
+  // If used with from_utc_time then it is the number of timeranges to return starting from that time.
+  // If used with to_utc_time then it is the number of timeranges to return preceding that time.
+  optional uint32 count = 5;
+}
+
+// This may come in multiple chunks if many items are reported.
+message TradingDayTimeRangeReport
+{
+  // Trading day start/end times.
+  repeated TradingDayTimeRange trading_day_time_ranges = 1;
+
+  // Request was done for the range that was too long, so it was truncated.
+  optional bool truncated = 2;
+}
+
+// Trading day start/end times and date.
+message TradingDayTimeRange
+{
+  // Trading date, local to exchange, time part is not used (set to 00:00).
+  required sint64 trade_date = 1;
+
+  // The next two fields are not present for holidays,
+  // because there’s no trading day for these dates, hence no start and end times.
+  // UTC time of trading day start (first session pre-Open time).
+  optional sint64 start_utc_time = 2;
+
+  // UTC time of trading day end (last session post-Close time).
+  optional sint64 end_utc_time = 3;
+}

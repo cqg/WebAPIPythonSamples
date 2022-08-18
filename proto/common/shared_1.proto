@@ -1,0 +1,371 @@
+// Entities shared between different protocols.
+//
+syntax = "proto2";
+
+package shared_1;
+
+////------------------------------------------
+//// Entities
+
+// Text with a unique key. Possible text messages are listed in a separate document.
+message Text
+{
+   // Message unique key.
+   required string key = 1;
+
+   // Message text.
+   required string text = 2;
+
+   // Optional message format string which is sent only if a message has parameters.
+   // Format is defined as a sample for localized clients to replace it with a translated version
+   // and compose a message using variable parameters.
+   // Format string sample: "The request is rejected because %1% limit of %2% per %3% seconds is exceeded"
+   optional string format = 3;
+
+   // Optional list of format string parameters ordered according to the format string placeholders.
+   // E.g. parameters for the sample format string above could be: ["request rate", "1000", "10"].
+   // Note: float numbers are always defined in decimal format with a dot separator like "23434.34"
+   // and date and time in extended ISO 8601 format as "2016-11-09 15:11:20.323" (time part is optional for
+   // dates, date part is optional for time only, seconds in time part also may not have fractional part).
+   // Client can convert these values to different formats if they need to.
+   repeated string param = 4;
+}
+
+
+////------------------------------------------
+//// Enumerations
+
+// Message for holding OrderStatus enum values as a name space.
+message OrderStatus
+{
+   // Status of the order.
+   enum Status
+   {
+      // Original order is sent to execution system.
+      IN_TRANSIT = 1;
+
+      // Order is rejected.
+      REJECTED = 2;
+
+      // Order is acknowledged by execution system and perhaps partially filled.
+      WORKING = 3;
+
+      // Order is expired.
+      EXPIRED = 4;
+
+      // Cancel request is sent to execution system.
+      IN_CANCEL = 5;
+
+      // Modify request is sent to execution system.
+      IN_MODIFY = 6;
+
+      // Order is canceled.
+      CANCELLED = 7;
+
+      // Order is completely filled by execution system.
+      FILLED = 8;
+
+      // Order is waiting submission to execution system.
+      SUSPENDED = 9;
+
+      // Order may be canceled because a disconnect occurred.
+      DISCONNECTED = 10;
+
+      // Order will be placed at a specified time (waiting execution system to start accepting orders).
+      ACTIVEAT = 11;
+
+      // Cross order is sent to exchange and waiting for approval from exchange and/or counter-parties.
+      APPROVE_REQUIRED = 12;
+
+      // The exchange approved the cross order.
+      // Note that this approve relates only to the sides/participants specified in the order.
+      // Thus, it is not implied the exchange approved the other sides of the order (counter-parties).
+      APPROVED_BY_EXCHANGE = 13;
+
+      // Cross order is rejected by one of its participants.
+      // Note that if a participant rejects its own side of the cross order, the counter-parties may not receive
+      // any reject messages if exchange does not support this notification.
+      APPROVE_REJECTED = 14;
+
+      // Cross order is completely executed on exchange, this is the final state of the cross order unless any of its
+      // trades/legs is subsequently broken by the exchange.
+      MATCHED = 15;
+
+      // Cross order/leg is executed on exchange, this is transit state until all transactions for trades/breaks are
+      // received.
+      PARTIALLY_MATCHED = 16;
+
+      // Cross order was executed on exchange, but now all its trades/legs have been broken by the exchange.
+      TRADE_BROKEN = 17;
+   }
+}
+
+// Message for holding TransactionStatus enum values as a name space.
+message TransactionStatus
+{
+   // Status of the transaction.
+   enum Status
+   {
+      // Original order is sent to execution system.
+      IN_TRANSIT = 1;
+
+      // Original order is rejected (exception).
+      REJECTED = 2;
+
+      // Order is acknowledged by execution system.
+      ACK_PLACE = 3;
+
+      // Order is expired (exception).
+      EXPIRED = 4;
+
+      // Cancel request is sent to execution system.
+      IN_CANCEL = 5;
+
+      // Cancel is acknowledged by execution system.
+      ACK_CANCEL = 6;
+
+      // Cancel request is rejected (exception).
+      REJECT_CANCEL = 7;
+
+      // Modify request is sent to execution system.
+      IN_MODIFY = 8;
+
+      // Modify is acknowledged by execution system.
+      ACK_MODIFY = 9;
+
+      // Modify request is rejected (exception).
+      REJECT_MODIFY = 10;
+
+      // Fill event is received from execution system.
+      FILL = 11;
+
+      // Order is suspended (parked).
+      SUSPEND = 12;
+
+      // Referenced fill is corrected.
+      FILL_CORRECT = 13;
+
+      // Referenced fill is canceled (exception).
+      FILL_CANCEL = 14;
+
+      // Referenced fill is busted (exception).
+      FILL_BUST = 15;
+
+      // Acknowledgment that order will activate at specified time.
+      ACTIVEAT = 16;
+
+      // Order may be canceled because a disconnect occurred (exception).
+      DISCONNECT = 17;
+
+      // Synthetic order was sent to the actual execution system.
+      SYNTHETIC_ACTIVATED = 18;
+
+      // Order status and/ or attributes are updated.
+      UPDATE = 19;
+
+      // Synthetic strategy execution failed, expect 'text_message'
+      // attribute with further details. The client may identify outright orders used
+      // when attempting to execute the synthetic strategy by finding orders in its
+      // book where OrderStatus.origin_order_id == OrderStatus.order_id.
+      SYNTHETIC_FAILED = 20;
+
+      // Synthetic strategy order has at least one overfilled leg, 'synthetic_hang' attribute is populated.
+      SYNTHETIC_OVERFILL = 21;
+
+      // Hanging quantity update for the synthetic strategy order.
+      SYNTHETIC_HANG = 22;
+
+      // Cross order is in OrderStatus.APPROVE_REQUIRED and TransactionStatus.APPROVING state when it is
+      // acknowledged by exchange but waiting for approval from counter-parties.
+      // Note: if exchange does not support this status, APPROVED_BY_EXCHANGE status is sent instead.
+      APPROVING = 23;
+
+      // Cross order is in OrderStatus.APPROVE_REQUIRED and TransactionStatus.APPROVE_REQUESTED state when
+      // it is waiting for approval from the client (i.e. from the side/participant that received this transaction).
+      APPROVE_REQUESTED = 24;
+
+      // The exchange approved the cross order.
+      // Note that this approve relates only to the sides/participants specified in the order.
+      // Thus, it is not implied the exchange approved the other sides of the order (counter-parties).
+      APPROVED_BY_EXCHANGE = 25;
+
+      // Cross order is rejected by one of its participants.
+      // Note that if a participant rejects its own side of the cross order, the counter-parties may not receive
+      // any reject messages if exchange does not support this notification.
+      REJECTED_BY_USER = 26;
+
+      // Cross order is executed on exchange.
+      MATCHED = 27;
+
+      // Cross order/leg have been broken by the exchange.
+      TRADE_BROKEN = 28;
+
+      // Previously matched cross order/leg have been amended by the exchange.
+      TRADE_AMENDED = 29;
+   }
+}
+
+////------------------------------------------
+//// Sign On messages
+
+// Initial message to obtain access.
+message SignOnRequest
+{
+   required string access_key = 1;
+}
+
+// Sign On result.
+message SignOnResult
+{
+   enum ResultCode
+   {
+      /// success codes (0 - 100)
+      SUCCESS = 0;
+
+      //// failure codes (100+)
+      // General failure.
+      FAILURE = 101;
+   }
+
+   // Operation status.
+   // This field is associated with ResultCode enum.
+   required uint32 result_code = 1;
+
+   // Operation details.
+   optional shared_1.Text details = 2;
+}
+
+////------------------------------------------
+//// Entitlement messages
+
+// Request for a list of entitlements of the current user.
+message EntitlementRequest
+{
+}
+
+// Report with a list of entitlements of the current user.
+message EntitlementReport
+{
+   // List of entitlements.
+   repeated Entitlement entitlement = 1;
+}
+
+message Entitlement
+{
+   enum EntitlementType
+   {
+       // Feature entitlement.
+       // The code points to a feature number.
+       FEATURE = 8;
+
+       // News entitlement.
+       // The code points to the enabled news feed.
+       NEWS = 10;
+
+       // Dow Jones news entitlement
+       // The code points to DJ news feed.
+       DJNEWS = 26;
+
+       // Manage metadata on a security (prefix) level.
+       // The code points to a contributor id.
+       MANAGE_SECURITY_METADATA = 49;
+
+       // Manage metadata on a contract level.
+       // The code points to a contributor id.
+       MANAGE_CONTRACT_METADATA = 50;
+
+       // Manage OTC state.
+       // The code points to a group of OTC services.
+       OTC_MANAGE_TAILS = 51;
+   }
+   // This value is associated with EntitlementType enum.
+   // Ignore Entitlement entry if entitlement_type is not one of EntitlementType
+   required uint32 entitlement_type = 1;
+
+   // The code that depends on the type.
+   required string entitlement_code = 2;
+}
+
+////------------------------------------------
+//// Notification destination entities.
+
+// Destination specification.
+// Only one type of destination can be specified.
+message Destination
+{
+   // Optional destination description.
+   optional string description = 1;
+
+   // APN destination (for iOS devices).
+   optional ApplePushNotif apple_push_notif = 2;
+
+   // GCM destination (for Android devices), not supported yet.
+   optional GooglePushNotif google_push_notif = 3;
+
+   // Email destination.
+   optional EmailNotif email_notif = 4;
+
+   // SMS.
+   optional SmsNotif sms_notif = 5;
+}
+
+// Push notification for iOS devices.
+message ApplePushNotif
+{
+   // iOS device token
+   required string device_token = 1;
+
+   // APN application ID
+   required string app_id = 2;
+}
+
+// Push notification for Android devices, not supported yet.
+message GooglePushNotif
+{
+   // registration token for Android device and app
+   required string registration_token = 1;
+
+   // GCN sender id
+   required string sender_id = 2;
+}
+
+// Notification property (e.g. order related information for order event rule notifications).
+message NotificationProperty
+{
+   // Property name.
+   required string property_name = 1;
+
+   // Property value.
+   required string property_value = 2;
+}
+
+// Email notification.
+message EmailNotif
+{
+   // List of recipients to send email to. At least one entry must be present.
+   repeated string recipients = 1;
+}
+
+// Sms notification.
+message SmsNotif
+{
+   // Destination phone number.
+   required string phone_number = 1;
+}
+
+
+////------------------------------------------
+//// Misc reusable messages
+
+// Named value that can be used for custom parameters or properties.
+message NamedValue
+{
+   // Attribute name.
+   required string name = 1;
+
+   // Attribute value.
+   optional string value = 2;
+
+   // An optional "deleted" flag for update operations.
+   optional bool deleted = 3 [default = false];
+}

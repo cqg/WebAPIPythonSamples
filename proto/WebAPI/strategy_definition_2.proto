@@ -1,0 +1,181 @@
+// Strategy definition messages
+// Strategy definition requests/reports left in strategy_2.proto to break cyclic imports
+
+syntax = "proto2";
+
+package strategy_definition_2;
+
+import "common/decimal.proto";
+
+// Message describing a synthetic, a user defined strategy or a native spread.
+// It is a tree where terminal nodes (legs) are outright contracts, non-terminal ones are nested strategies.
+// Nodes are defined from the BUY perspective.
+// Maximum strategy nesting level:
+// - Synthetic strategies: 2 (i.e. strategy of strategies of legs);
+// - Exchange strategies: depends only on exchange.
+// Maximum number of legs in the whole strategy:
+// - Synthetic strategies: 40;
+// - Exchange strategies: depends only on exchange.
+message StrategyDefinition
+{
+  // Using a fractional trade ratio may result in fractional lots. If so, the number of lots has to be rounded.
+  // Rounding applies only to complex strategies with fractional quantity ratios.
+  enum RoundLegMode
+  {
+    // always round down, e.g. 1.1 -> 1 and -2.1 -> -2
+    ROUND_LEG_MODE_DOWN = 1;
+
+    // always round up, e.g. 1.1 -> 2 and -2.1 -> -3
+    ROUND_LEG_MODE_UP = 2;
+
+    // round up when fractional part is 5 or greater;
+    // round down when fractional part is less than 5, e.g. 1.1 -> 1 and 1.6 -> 2
+    ROUND_LEG_MODE_MATH = 3;
+  }
+
+  // The strategy is of the aggregation type.
+  optional bool aggregation = 1;
+
+  // If specified - defines exchange strategy, otherwise - synthetic strategy.
+  optional ExchangeStrategy exchange_strategy = 2;
+
+  // The strategy is a native spread.
+  // Note: this field can only be set by server and cannot be used in StrategyDefinitionRequest.
+  optional bool native_spread = 9;
+
+  // Strategy tick size (correct price format). The tick size of the 1st leg is default.
+  optional double tick_size = 3;
+
+  // Additive offset for computation of strategy price.
+  // 0 is default.
+  optional double price_offset = 4;
+
+  // Controls how to handle fractional quantities when calculating leg quantities for an order on this strategy,
+  // One of RoundLegMode enums, ROUND_LEG_MODE_DOWN is default. Ignored for aggregations and exchange strategies.
+  optional uint32 round_leg_mode = 5;
+
+  // Unique node index within the root strategy to apply strategy trading parameters and to associate an order.
+  required uint32 node_index = 6;
+
+  // Legs or nested strategies.
+  repeated StrategyNodeDefinition node_definitions = 7;
+
+  // User text associated with the strategy. Allowed to be specified only for non-exchange strategies.
+  optional string user_description = 8;
+}
+
+// Defines a strategy created by an individual and registered by an exchange for general open market trading.
+message ExchangeStrategy
+{
+  // Value of this field might be chosen from the predefined list to specify requested CQG exchange strategy type.
+  // List of supported types can be found in document ExchangeStrategyRequestedCQGTypes.adoc.
+  // "custom" if omitted.
+  // This field is never provided in response.
+  // Strategy can be created on exchange even if requested type is different than actual type recognized by exchange.
+  optional string requested_cqg_type = 1;
+}
+
+// Defines a leg (resolved contract) of a strategy.
+message LegDefinition
+{
+  // Id of the leg contract.
+  // Note: in case of receiving unknown id the contract metadata can be obtained via ContractMetadataRequest.
+  required uint32 contract_id = 1;
+
+  // Unique node index within the root strategy to apply strategy trading parameters and to associate an order.
+  required uint32 node_index = 2;
+
+  // Note: use qty_ratio field instead.
+  // This field has precision 1e-12 and can have maximum value of 9223372.
+  optional double double_qty_ratio = 3 [deprecated = true];
+
+  // Leg quantity ratio, signed decimal, number of leg contracts to buy(positive) or sell(negative).
+  // Must be integer for an aggregation.
+  // Default is 1.
+  optional cqg.Decimal qty_ratio = 8;
+
+  // Leg price calculation ratio, signed decimal, coefficient in strategy price formula before the leg contract.
+  // Same as qty_ratio if omitted.
+  // This field has precision 1e-12 and can have maximum value of 9223372.
+  // Applicable for legs of an aggregation or a multiplicative strategy.
+  optional double price_ratio = 4;
+
+  // Price offset for this leg (correct price format), only specified for legs of an aggregation or 
+  // a multiplicative strategy.
+  // 0 is default.
+  optional double price_offset = 5;
+
+  // Price of covering future contract. For exchange strategy only.
+  optional double covering_price = 6;
+
+  // Used to calculate the quantity of futures covering the option or options strategy. For exchange strategy only.
+  // Note: only qty_ratio sign means side of the leg (buy if positive or sell if negative).
+  optional cqg.Decimal option_delta = 7;
+}
+
+// Defines a strategy nested inside a parent strategy.
+message NestedStrategy
+{
+  // Nested strategy definition.
+  required StrategyDefinition definition = 1;
+
+  // Id of the nested strategy, if it already exists on exchange.
+  // Note: can be provided by server in case of receiving contract metadata for multi-level strategy.
+  // Note: in case of receiving unknown id the contract metadata can be obtained via ContractMetadataRequest.
+  optional uint32 contract_id = 4;
+
+  // Note: use qty_ratio field instead.
+  optional double double_qty_ratio = 2 [deprecated = true];
+
+  // Quantity ratio, signed decimal, number of leg contracts to buy(positive) or sell(negative).
+  // Default is 1.
+  optional cqg.Decimal qty_ratio = 5;
+
+  // Leg price calculation ratio, signed decimal, coefficient in strategy price formula.
+  // Same as qty_ratio if omitted.
+  // Applicable for legs of an aggregation or a multiplicative strategy.
+  optional double price_ratio = 3;
+}
+
+// Child node definition within the parent strategy tree. Can be either a resolved contract (leg) or a nested strategy.
+message StrategyNodeDefinition
+{
+  // Operation on a node of the synthetic strategy.
+  // Associating an operation with a node allows using different operations, e.g. multiplication and subtraction,
+  // without introducing intermediate StrategyDefinition entities.
+  // MUL and DIV cannot be mixed with SUM within the same StrategyDefinition.node_definition array.
+  // i.e. node1 / node2 * node3 is allowed, but node1 / node2 + node3 is not.
+  enum NodeOperation
+  {
+    // Add the quantity and the price.
+    NODE_OPERATION_SUM = 1;
+
+    // Add the quantity but multiply the price.
+    NODE_OPERATION_MUL = 2;
+
+    // Subtract the quantity but divide the price.
+    NODE_OPERATION_DIV = 3;
+  }
+
+  // Specified node operation, one of NodeOperation enums, the default is SUM.
+  optional uint32 node_operation = 2;
+
+  // Leg definition, if the node is a resolved contract.
+  optional LegDefinition leg = 3;
+
+  // Nested strategy, mutually exclusive with 'leg' attribute.
+  optional NestedStrategy nested_strategy = 4;
+}
+
+// Algo strategy definition.
+message AlgoStrategyDefinition
+{
+  // Algo strategy abbreviation.
+  optional string abbreviation = 1;
+
+  // Algo strategy definition.
+  // Contains FIXatdl document that describes the list of parameters, their types and some UI specifics.
+  // Non-standard extensions to FIXatdl may be used.
+  // Ignore algo strategy if definition cannot be completely parsed by client.
+  optional string definition = 2;
+}

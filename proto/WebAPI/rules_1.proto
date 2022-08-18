@@ -1,0 +1,322 @@
+// Rules server messages
+// Times are in google.protobuf.Timestamp since Unix Epoch on January 1st, 1970
+
+syntax = "proto2";
+
+package rules_1;
+
+import "common/shared_1.proto";
+import "google/protobuf/timestamp.proto";
+
+////------------------------------------------
+//// Rule messages
+
+// Client rule messages.
+// Only one rule operation is allowed.
+message RuleRequest
+{
+  // Request identifier.
+  required string request_id = 1;
+
+  // Create or update a rule.
+  optional SetRuleRequest set_rule_request = 2;
+
+  // Delete a rule.
+  optional DeleteRuleRequest delete_rule_request = 3;
+
+  // Get a list of rules.
+  optional RulesListRequest rules_list_request = 4;
+
+  // Request notification history.
+  optional NotificationHistoryRequest notification_history_request = 5;
+
+  // Creates or modifies a destination group.
+  optional CreateOrModifyDestinationGroupRequest create_or_modify_destination_group_request = 6;
+
+  // Deletes a destination group.
+  optional DeleteDestinationGroupRequest delete_destination_group_request = 7;
+
+  // List destination groups.
+  optional DestinationGroupListRequest destination_group_list_request = 8;
+}
+
+// Server rule messages.
+message RuleResult
+{
+  enum ResultCode
+  {
+    /// success codes (0 - 100)
+    SUCCESS = 0;
+
+    //// failure codes (100+)
+    // General failure.
+    FAILURE = 101;
+  }
+
+  // ID of a corresponding request or subscription.
+  required string request_id = 1;
+
+  // Operation status.
+  // This field is associated with ResultCode enum.
+  required uint32 result_code = 2;
+
+  // Operation details.
+  optional shared_1.Text details = 3;
+
+  // Result of set rule operation.
+  optional SetRuleResult set_rule_result = 4;
+
+  // Result of delete rule operation.
+  optional DeleteRuleResult delete_rule_result = 5;
+
+  // Result of rules list request.
+  optional RulesListResult rules_list_result = 6;
+
+  // Result of notification history request.
+  optional NotificationHistoryResult notification_history_result = 7;
+
+  // Result of create or modify destination group operation.
+  optional CreateOrModifyDestinationGroupResult create_or_modify_destination_group_result = 8;
+
+  // Result of delete destination group operation.
+  optional DeleteDestinationGroupResult delete_destination_group_result = 9;
+
+  // Result of list destination groups request.
+  optional DestinationGroupListResult destination_group_list_result = 10;
+}
+
+
+////------------------------------------------
+//// Rule entities
+
+// Rule definition contains one of the specific rules.
+// Only one specific rule can be specified.
+// The complete definition is expected regardless if these is a new rule or an update of existing one.
+message RuleDefinition
+{
+  // Client ID of the rule.
+  // It has to be unique for this client.
+  required string rule_id = 1;
+
+  // List of optional client rule tags, the value is ignored.
+  repeated string rule_tag = 2 [deprecated = true];
+
+  // Rule expiration time, the value is ignored.
+  optional google.protobuf.Timestamp expiration_utc_timestamp = 3 [deprecated = true];
+
+  // List of actions for rule execution.
+  repeated Action action = 4;
+
+  // Order event rule definition.
+  optional OrderEventRule order_event_rule = 5;
+
+  // True means the rule is in execution.
+  // To enable or disable the rule the client updates the rule
+  // with a corresponding values of this flag.
+  optional bool enabled = 6 [default = true];
+}
+
+// Possible actions for rule execution.
+// Only notifications are supported at the moment.
+message Action
+{
+  // List of destinations to notify.
+  repeated shared_1.Destination destination = 4;
+
+  // List of destination groups to notify.
+  repeated string destination_group_id = 5;
+}
+
+// Order event notification rule.
+// Use it to get notifications for order events.
+message OrderEventRule
+{
+  // Optional list of accounts.
+  // All accounts of the client if not specified.
+  repeated sint32 account_id = 1;
+
+  // Optional list of order statuses that server will notify about.
+  // The server will notify about all order statuses if not specified.
+  // Associated with shared_1.OrderStatus.Status enum type.
+  repeated uint32 order_status = 2;
+
+  // Optional list of transaction statuses that server will notify about.
+  // The server will notify about all transaction statuses if not specified.
+  // Note: if it's specified along with order_status field only notifications matching both filters will be sent.
+  // Associated with shared_1.TransactionStatus.Status enum type.
+  repeated uint32 transaction_status = 3;
+
+  // Custom order event filters.
+  repeated OrderEventFilter filters = 4;
+}
+
+////------------------------------------------
+//// Subscription entities.
+
+// Notification by a history request.
+message NotificationReport
+{
+  // Notification title.
+  required shared_1.Text title = 1;
+
+  // Notification body.
+  required shared_1.Text body = 2;
+
+  // Rule ID that triggered corresponding action.
+  required string rule_id = 3;
+
+  // Optional notification specific information.
+  repeated shared_1.NotificationProperty notification_property = 4;
+
+  // Time when the notification was triggered.
+  required google.protobuf.Timestamp when_utc_timestamp = 5;
+}
+
+// Represents configured order rule filter for specific event.
+message OrderEventFilter
+{
+    // Filter type.
+    // This field is associated with EventFilterType enum.
+    // It is required field.
+    optional uint32 filter_type = 1;
+
+    // Custom filter value. (max length = 128).
+    // It is required field.
+    optional string value = 2;
+}
+
+enum OrderEventFilterType
+{
+    ORDER_EVENT_FILTER_TYPE_CONTRIBUTOR_ID = 1;
+}
+
+////------------------------------------------
+//// Rule operations
+
+// Create or update a rule.
+message SetRuleRequest
+{
+  // Definition of the rule.
+  // The complete definition is expected
+  // regardless if these are new rules of updates.
+  required RuleDefinition rule_definition = 1;
+}
+
+// Result of set rule operation.
+message SetRuleResult
+{
+}
+
+// Delete a rule.
+message DeleteRuleRequest
+{
+  // Rule to delete.
+  required string rule_id = 1;
+}
+
+// Result of delete rule operation.
+message DeleteRuleResult
+{
+}
+
+// Get a list of rules.
+message RulesListRequest
+{
+  // Optional filter with a list of tags, the value is ignored.
+  repeated string rule_tag = 1 [deprecated = true];
+}
+
+// Result of rules list request.
+message RulesListResult
+{
+  // List of found rules.
+  // Clients have to be ready to receive rules that they cannot recognize
+  // and ignore them. They must not remove or update unknown rules since they
+  // can be used by different applications or different versions of the same application.
+  repeated RuleDefinition rule_definition = 1;
+}
+
+// Request for notifications history.
+// The history is limited to 30 last days.
+message NotificationHistoryRequest
+{
+  // Start point for the history request, inclusive.
+  // Maximum allowed history is returned if omitted.
+  optional google.protobuf.Timestamp from_utc_timestamp = 1;
+
+  // Stop point for the history request, inclusive.
+  // History up till now is returned if omitted.
+  optional google.protobuf.Timestamp to_utc_timestamp = 2;
+}
+
+// Result of notification history request.
+message NotificationHistoryResult
+{
+  // List of notifications.
+  repeated NotificationReport notification_report = 1;
+}
+
+////------------------------------------------
+//// Destination group requests.
+
+// Create or modify a destination group.
+message CreateOrModifyDestinationGroupRequest
+{
+   // Id of the group to modify or create if it does not exist.
+   required string destination_group_id = 1;
+
+   // Destination list to remove from the group.
+   // Destinations that are not found among the existing ones are ignored.
+   // Removing is done prior destination adding by destination_to_add parameter.
+   // Destinations are identified by the following set of parameters:
+   // (device_token, app_id) for ApplePushNotif,
+   // (registration_token, sender_id) for GooglePushNotif,
+   // (recipients) for EmailNotif,
+   // (phone_number) for SmsNotif.
+   optional shared_1.Destination destination_to_remove = 2;
+
+   // Destination list to add or update in the group.
+   // Existing members in the group referring the same destination will be overwritten.
+   // See comment of destination_to_remove field of how destinations are identified.
+   optional shared_1.Destination destination_to_add_or_update = 3;
+}
+
+// Result of create or modify destination group operation.
+message CreateOrModifyDestinationGroupResult
+{
+}
+
+// Delete a destination group.
+message DeleteDestinationGroupRequest
+{
+   // Id of the group to delete.
+   required string destination_group_id = 1;
+}
+
+// Result of delete destination group operation.
+message DeleteDestinationGroupResult
+{
+}
+
+// Lists destination groups.
+message DestinationGroupListRequest
+{
+}
+
+// Result of list destination group operation.
+message DestinationGroupListResult
+{
+   // List of available destination groups.
+   repeated DestinationGroup destination_group = 1;
+}
+
+// Group of destinations.
+// Multiple rules can have the same destination group. A group can be modified independently on rules which using it.
+message DestinationGroup
+{
+   // Id of the group.
+   required string destination_group_id = 1;
+
+   // List of destinations in the group.
+   repeated shared_1.Destination destination = 2;
+}

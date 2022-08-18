@@ -1,0 +1,778 @@
+// User session level messages
+
+syntax = "proto2";
+
+package user_session_2;
+
+import "common/shared_1.proto";
+
+// Real-time Collapsing level enumeration.
+// Collapsing is a mechanism of eliminating some intermediate quotes to present more up-to-date market data
+// instead of falling behind.
+// It is started dynamically by server if client is not able to consume all requested feed timely
+// e.g. because of a narrow network channel or client side hardware/ software issues.
+//
+// * When real time price data in a session queue becomes >=1 seconds old (configurable) DOM collapsing is applied
+//   so per contract snapshot is sent at the end of the contract data messages.
+// * When real time price data in a session queue is >=4 seconds old (configurable) BBA collapsing is done
+//   so only last per contract BBA quotes are delivered.
+// * When real time price data in a session queue is >=8 seconds old (configurable) Trade collapsing is done
+//   so only last per contract Trade quotes are delivered.
+// * Quote representing Open, High or Low is always sent to the client regardless of current collapsing level.
+// * Quote representing Settlement is always sent to the client regardless of current collapsing level.
+// * If the difference between first and last quote in the queue reaches 60 (current setting) seconds 
+// (configurable with per user overrides for VIP access) the connection is closed with sending a special user message.
+//
+// The user can specify maximum allowed collapsing level, 
+// see Logon/RestoreOrJoinSession message's max_collapsing_level field, or SetCollapsingLevelRequest message.
+// Server will honor the setting, but still disconnect the user 
+// if the data in outgoing queue becomes 60 sec(current setting) old.
+//
+// CONCLUSION: In case of bad network conditions, the client has a choice:
+//
+// a) To receive more complete realtime data but risk being disconnected:
+//    the lower chosen max_collapsing_level - the higher risk of disconnections.
+//
+// b) To receive collapsed but up-to-date realtime data and stay connected:
+//    it is advised to leave field max_collapsing_level out, or set it to REAL_TIME_COLLAPSING_LEVEL_DOM_BBA_TRADES.
+//
+enum RealTimeCollapsingLevel
+{
+  // Collapsing is not not preferred.
+  REAL_TIME_COLLAPSING_LEVEL_NONE = 0;
+
+  // DOM data is collapsed.
+  REAL_TIME_COLLAPSING_LEVEL_DOM = 1;
+
+  // DOM and best bid/ ask quotes are collapsed delivering only last BBA but all trades.
+  REAL_TIME_COLLAPSING_LEVEL_DOM_BBA = 2;
+
+  // DOM, best bid/ ask and trades quotes are collapsed delivering only last values.
+  REAL_TIME_COLLAPSING_LEVEL_DOM_BBA_TRADES = 3;
+}
+
+// Logon into the system and opening a new session.
+// Clients should either use user_name/password or access_token to enter the system.
+message Logon
+{
+  // User login name.
+  // It is not used along with access_token.
+  optional string user_name = 1;
+
+  // User's password.
+  // It is not used along with access_token.
+  optional string password = 2;
+
+  // Access token.
+  // It is not used along with user_name, password and one_time_password.
+  optional string access_token = 14;
+
+  // Token of the user externally authenticated by CQG partner.
+  // It is not used along with user_name, password and one_time_password.
+  // Mutually exclusive with access_token.
+  optional string partner_token = 19;
+
+  // User's one time password, might be required according to the user's settings.
+  optional string one_time_password = 3;
+
+  // Private label identifies the Firm or Vendor that connects to the server. The value is ignored and taken from
+  // access_token if it's specified. If neither access_token nor private_label is specified, the private_label is set
+  // equal to client_app_id field value.
+  optional string private_label = 4;
+
+  // Identifier of the client application as assigned by CQG. The value is ignored and taken from access_token
+  // if it's specified; otherwise the field value is required to be provided.
+  optional string client_app_id = 5;
+
+  // Version of a client application.
+  required string client_version = 6;
+
+  // Optional field that indicates if possible concurrent sessions for this user should be forcedly dropped.
+  // If it is set to false then Logon may fail with CONCURRENT_SESSION code.
+  // If it is omitted or set to true then concurrent sessions for this user will be dropped.
+  optional bool drop_concurrent_session = 7;
+
+  // Maximum allowed real-time market data collapsing level.
+  // REAL_TIME_COLLAPSING_LEVEL_DOM_BBA_TRADES is the default allowed collapsing level.
+  // This field is associated with RealTimeCollapsingLevel enum type.
+  // Only one of max_collapsing_level and market_data_bandwidth can be specified.
+  optional uint32 max_collapsing_level = 8;
+
+  // Current protocol version that is used by the client application.
+  // It is strongly recommended for client applications
+  // to put PROTOCOL_VERSION_MAJOR and PROTOCOL_VERSION_MINOR values from a used protocol file.
+  // If version information is not provided then Server assumes client uses 0.x version of the protocol
+  // and may disable some new protocol features.
+  optional uint32 protocol_version_minor = 9;
+  optional uint32 protocol_version_major = 10;
+
+  enum SessionSetting
+  {
+    // Allows restoring session in case of an accidental disconnect (see RestoreOrJoinSession message).
+    // If the setting is not specified then termination of the last connection
+    // also terminates the session without ability to restore it.
+    // For security reasons clients should not specify this setting without using the restore session functionality.
+    SESSION_SETTING_ALLOW_SESSION_RESTORE = 1;
+
+    // Allows other new connections to join the session (see RestoreOrJoinSession message) and work concurrently.
+    // If the setting is not specified then the session can have only one connection at each moment
+    // and a new connection pushes the old one out (if the session restore is allowed).
+    // For security reasons clients should not specify this setting without using join session functionality.
+    SESSION_SETTING_ALLOW_SESSION_JOIN = 2;
+  }
+
+  // List of settings for a new session.
+  // This field is associated with SessionSetting enum type.
+  repeated uint32 session_settings = 11;
+
+  // Real-time market data bandwidth limit (in KB per second).
+  // Only one of max_collapsing_level and market_data_bandwidth can be specified.
+  optional uint32 market_data_bandwidth = 12;
+
+  // Dialect ID for used symbols.
+  // CQG dialect is used if omitted.
+  // Id for CQG dialect is 0.
+  // Please contact CQG to get the list of supported dialects.
+  optional string dialect_id = 13;
+
+  // Fingerprint of a client application installation on a particular device.
+  // This is just a string from the server perspective. Clients should make
+  // sure it stays the same across runs of the application installation on
+  // a specific device or Web application in a specific browser on this
+  // device. Possible approaches to get the value on the client side:
+  // http://clientjs.org/
+  // https://developer.android.com/training/articles/user-data-ids.html
+  optional string fingerprint = 15;
+
+  // Client's operating system (with version, e.g. "Windows 7" or "Android").
+  optional string operating_system = 16;
+
+  // Client's browser name (if applicable, without version, e.g. "Chrome" or "Firefox").
+  optional string browser = 17;
+
+  // Client's device model (specific names for mobile, like "iPhone 7", or "PC" if not mobile/tablet).
+  optional string device_model = 18;
+}
+
+// Result of the logon operation (for Logon and LogonRoutineClient messages).
+message LogonResult
+{
+  enum ResultCode
+  {
+    //// success codes
+    // User is logged in to the system.
+    RESULT_CODE_SUCCESS = 0;
+
+    //// failure codes (100+)
+    // General failure.
+    RESULT_CODE_FAILURE = 101;
+
+    // One-time password is required for this user but it was not sent, repeat logon
+    // with one-time password.
+    RESULT_CODE_NO_ONETIME_PASSWORD = 103;
+
+    // User password is expired, only change password operation is allowed.
+    RESULT_CODE_PASSWORD_EXPIRED = 104;
+
+    // Failed because this user has a concurrent session that is
+    // not allowed for this application and drop was not requested.
+    RESULT_CODE_CONCURRENT_SESSION = 105;
+
+    // Client is redirected to a different server, new server is specified in redirectUrl.
+    RESULT_CODE_REDIRECTED = 106;
+
+    // The negotiation rules for LogonRoutineClient have been violated,
+    // e.g. user has specified several fields at once in one message.
+    RESULT_CODE_ROUTINE_ERROR = 107;
+
+    // Access token is expired already.
+    RESULT_CODE_ACCESS_TOKEN_EXPIRED = 108;
+  }
+
+  // One of the logon result codes.
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 1;
+
+  // Base time as ISO 8601 string (e.g. '2013-04-03T14:23:20')
+  // all other times are number of milliseconds from this base time.
+  required string base_time = 2;
+
+  // Token of a new session if logon succeeded.
+  optional string session_token = 3;
+
+  // Optional logon result message for failure details.
+  optional string text_message = 4;
+
+  // URL for a client to reconnect in case of redirection.
+  optional string redirect_url = 5;
+
+  // Current protocol version of server. Normally client application need nothing to do with it.
+  required uint32 protocol_version_minor = 6;
+  required uint32 protocol_version_major = 7;
+
+  // Unique user identification.
+  optional sint32 user_id = 8;
+
+  // Time when the message was sent.
+  required sint64 server_time = 9;
+
+  // Timeout of session inactivity, number of minutes. This is clients'
+  // responsibility to track activity and disable/close the session after
+  // the timeout.
+  optional uint32 inactivity_timeout = 10;
+}
+
+// Message for multi-step logon which user should use in case if it is required to use encoded password.
+// Multi-step logon sequence has the following steps:
+//      1) Client initiates logon negotiation by sending LogonRoutineClient.logon_init message to the server.
+//      2) Server sends one or more LogonRoutineServer.password_request messages (this step may repeat after step #3).
+//      3) Client sends list of LogonRoutineClient.password_response back to the server.
+//      4) Server optionally asks accept trader's agreement (LogonRoutineServer.trader_agreement_url).
+//      5) Client responds with LogonRoutineClient.trader_agreement_accepted equal to True
+//         if the user accepts agreement, False or LogonRoutineClient.abort_logon otherwise.
+//      6) Server sends LogonRoutineServer.logon_result as the final message of the negotiation with the results.
+//   Client may stop the negotiation by sending LogonRoutineClient.abort_logon message in response to any server
+//      LogonRoutineServer.password_request or LogonRoutineServer.trader_agreement_url requests.
+// NOTE: only one of fields has to be specified.
+message LogonRoutineClient
+{
+  // Initiating of multi-step logon process by client.
+  optional LogonInit logon_init = 1;
+
+  // List of passwords in response to request from server.
+  // The number of passwords in response should be equal to the number of passwords in request from server.
+  repeated PasswordResponse password_responses = 2;
+
+  // True means user has accepted the trader agreement.
+  optional bool trader_agreement_accepted = 3;
+
+  // Aborting of multi-step logon process by client.
+  optional AbortRoutine abort_logon = 4;
+}
+
+// Response to the LogonRoutineClient message. Only one of fields is specified.
+message LogonRoutineServer
+{
+  // Final message of the negotiation with the results.
+  optional LogonResult logon_result = 1;
+
+  // List of requested passwords.
+  repeated PasswordRequest password_requests = 2;
+
+  // URL pointing to the location of help information for this version of agreement.
+  // Specified if user should accept trader's agreement in order to continue logon process.
+  optional string trader_agreement_url = 3;
+}
+
+// Message for multi-step password change which user should use in case if it is required to use encoded password.
+// Multi-step password change sequence has the following steps:
+//      1) Client initiates password change procedure by sending
+//         PasswordChangeRoutineClient.init_password_change to the server.
+//      2) Server sends one or more PasswordChangeRoutineServer.password_request messages
+//         (this step may repeat after step #3).
+//      3) Client sends list of PasswordChangeRoutineClient.password_response back to the server.
+//      4) Server sends PasswordChangeRoutineServer.password_change_result
+//         as the final message of the negotiation with the results.
+//         Client may stop the negotiation by sending
+//         PasswordChangeRoutineClient.abort_password_change message in response to any server
+//         PasswordChangeRoutineServer.password_request message.
+// NOTE: only one of fields has to be specified.
+message PasswordChangeRoutineClient
+{
+  // True means user has decided to initiate password changing procedure.
+  optional bool init_password_change = 1;
+
+  // List of passwords in response to request from server.
+  // The number of passwords in response should be equal to the number of passwords in request from server.
+  repeated PasswordResponse password_responses = 2;
+
+  // Aborting of multi-step password change process by client.
+  optional AbortRoutine abort_password_change = 3;
+}
+
+// Response to the PasswordChangeRoutineClient message. Only one of fields is specified.
+message PasswordChangeRoutineServer
+{
+  // List of requested passwords.
+  repeated PasswordRequest password_requests = 1;
+
+  // Final message of the negotiation with the results.
+  optional PasswordChangeResult password_change_result = 2;
+}
+
+// This message indicates that user has decided to abort the logon or password change processes.
+message AbortRoutine
+{
+  // Reason of logon or password change routine abort.
+  optional string comment = 1;
+}
+
+// Initiating of multi-step logon process by client. See description of fields in Logon message.
+message LogonInit
+{
+  required string user_name = 1;
+  optional string private_label = 2;
+  required string client_app_id = 3;
+  required string client_version = 4;
+  optional bool drop_concurrent_session = 5;
+  optional uint32 max_collapsing_level = 6;
+
+  optional uint32 protocol_version_minor = 7;
+  optional uint32 protocol_version_major = 8;
+  repeated uint32 session_settings = 9;
+  optional uint32 market_data_bandwidth = 10;
+  optional string dialect_id = 11;
+  optional string fingerprint = 12;
+  optional string operating_system = 13;
+  optional string browser = 14;
+  optional string device_model = 15;
+}
+
+// Parameters of requesting password from user.
+message PasswordRequest
+{
+  enum PasswordType
+  {
+    // Currently used password.
+    PASSWORD_TYPE_STATIC = 1;
+
+    // One-time password.
+    PASSWORD_TYPE_ONE_TIME = 2;
+
+    // New password that user wants to use. Can be specified only in result of PasswordChangeRoutineClient.
+    PASSWORD_TYPE_NEW_STATIC = 3;
+
+    // Currently used password and new password that user wants to use.
+    // Can be specified only in result of PasswordChangeRoutineClient.
+    PASSWORD_TYPE_CUR_AND_NEW_STATIC = 4;
+
+    // Non-password request with question e.g. "What is your favorite pet?".
+    PASSWORD_TYPE_TEXT = 5;
+  }
+
+  // ID of a request.
+  required uint32 request_id = 1;
+
+  // Type of password which server requests from the user.
+  // This field is associated with PasswordType enum type.
+  required uint32 password_type = 2;
+
+  // Commonly understood code that can be used to show an additional localized prompt for certain password types.
+  optional string user_prompt_type = 3;
+
+  // Alternate English text for clients which do not recognize user_prompt_type.
+  // This text can be displayed as-is to the user.
+  // NOTE: user_prompt_type and user_prompt_type_alt are a pair (so either none or both are provided).
+  optional string user_prompt_type_alt = 4;
+
+  // Text that should be displayed to the user as-is along with the localized prompt implied by user_prompt_type.
+  // If user_prompt_type_alt is used instead, this text should be displayed after it.
+  // user_prompt will only be provided if user_prompt_type and user_prompt_type_alt are provided,
+  // but it is optional even then.
+  optional string user_prompt = 5;
+
+  // Set of supported encodings for this request.
+  // Client should choose the encoding with highest priority from among those it implements.
+  repeated Encoding encodings = 6;
+}
+
+// Response to the PasswordRequest message.
+message PasswordResponse
+{
+  // ID of corresponding password request.
+  required uint32 request_id = 1;
+
+  // Commonly understood string that identifies the password encoding method.
+  required string encoding_type = 2;
+
+  // User's password encoded with specified encoding method.
+  required string password = 3;
+}
+
+// Description of the encoding method.
+message Encoding
+{
+  // Commonly understood string that identifies the encoding method.
+  // The following encodings are available: "none", "ds3_rsa", "isprint_e2ee".
+  required string encoding_type = 1;
+
+  // The priority for this encoding, value 1 is highest priority, 2 is next priority, etc.
+  required uint32 priority_rank = 2;
+
+  // Encoding parameters for this encoding method.
+  repeated EncodingParameter encoding_parameters = 3;
+}
+
+// The encoding parameter.
+message EncodingParameter
+{
+  // Encoding parameter's name.
+  required string name = 1;
+
+  // Encoding parameter's value.
+  required string value = 2;
+}
+
+// Client request to restore session because of accidental disconnect
+// or to join additional concurrent connection to existing session.
+// This message allows to avoid prompting user for [one-time] password.
+// In case of session restore client application has to [re-]subscribe and [re-]request necessary data.
+// Permissions to use this functionality is regulated
+// by ALLOW_SESSION_RESTORE/ALLOW_SESSION_JOIN session settings which are specified in Logon or LogonInit message.
+message RestoreOrJoinSession
+{
+  // Token of the session to restore/join, it has limited lifetime after disconnect of the last connection.
+  required string session_token = 1;
+
+  // Private label identifies the Firm or Vendor that connects to the server,
+  // client_app_id field value is taken by default.
+  optional string private_label = 2;
+
+  // Identifier of the client application as assigned by CQG.
+  // This field is required to be specified and left optional only for backward compatibility.
+  optional string client_app_id = 3;
+
+  // Maximum allowed real-time market data collapsing level.
+  // REAL_TIME_COLLAPSING_LEVEL_DOM_BBA_TRADES is the default allowed collapsing level.
+  // This field is associated with RealTimeCollapsingLevel enum type.
+  // Only one of max_collapsing_level and market_data_bandwidth can be specified.
+  optional uint32 max_collapsing_level = 4;
+
+  // Current protocol version that is used by the client application.
+  // It is strongly recommended for client applications
+  // to put PROTOCOL_VERSION_MAJOR and PROTOCOL_VERSION_MINOR values from a used protocol file.
+  // If version information is not provided
+  // then Server assumes client uses 0.x version of the protocol and may disable some new protocol features.
+  optional uint32 protocol_version_minor = 5;
+  optional uint32 protocol_version_major = 6;
+
+  // Real-time market data bandwidth limit (in KB per second).
+  // Only one of max_collapsing_level and market_data_bandwidth can be specified.
+  optional uint32 market_data_bandwidth = 7;
+}
+
+// Result of session restore or join attempt.
+message RestoreOrJoinSessionResult
+{
+  enum ResultCode
+  {
+    //// success codes
+    // User is logged in to the system.
+    RESULT_CODE_SUCCESS = 0;
+
+    //// failure codes (100+)
+    // General failure.
+    RESULT_CODE_FAILURE = 104;
+
+    // Session is unknown to a server, client must perform standard logon procedure.
+    RESULT_CODE_UNKNOWN_SESSION = 101;
+
+    // User is not allowed to perform session restore/join or the maximum connection number has been exceeded.
+    RESULT_CODE_ACCESS_DENIED = 102;
+
+    // Some RestoreOrJoinSession message fields were not filled.
+    RESULT_CODE_INVALID_PARAMS = 103;
+  }
+
+  // Session restore/join result.
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 1;
+
+  // Session base time (see LogonResult.base_time).
+  required string base_time = 2;
+
+  // Optional failure details.
+  optional string text_message = 3;
+
+  // Time when the message was sent.
+  required sint64 server_time = 4;
+
+  // Session default dialect ID for used symbols (see Logon.dialect_id).
+  optional string dialect_id = 5;
+
+  // Timeout of session inactivity, number of minutes. This is clients'
+  // responsibility to track activity and disable/close the session after
+  // the timeout (see LogonResult.inactivity_timeout).
+  optional uint32 inactivity_timeout = 6;
+}
+
+// Notifies about joining of a concurrent connection to the session (see RestoreOrJoinSession).
+message ConcurrentConnectionJoin
+{
+  // Shows if new connection has been initiated by an application of the same type
+  // (with the same private_label and client_app_id fields).
+  required bool is_same_app_type = 1;
+}
+
+// Client request to logoff from the system and close the session.
+message Logoff
+{
+  // Optional logoff reason.
+  optional string text_message = 1;
+}
+
+// Server notification about closing user's session,
+// server closes connection after this message.
+message LoggedOff
+{
+  enum LogoffReason
+  {
+    // User is logged off by client request.
+    LOGOFF_REASON_BY_REQUEST = 1;
+
+    // User is redirected to another URL.
+    LOGOFF_REASON_REDIRECTED = 2;
+
+    // System logged off the user because of some server side reason.
+    LOGOFF_REASON_FORCED = 3;
+
+    // System logged off the user because this session was re-assigned to another connection
+    // that took it over by 'restore session' operation.
+    LOGOFF_REASON_REASSIGNED = 4;
+  }
+
+  // One of the logoff reasons.
+  // This field is associated with LogoffReason enum type.
+  required uint32 logoff_reason = 1;
+
+  // Optional logoff details.
+  optional string text_message = 2;
+
+  // URL for redirection.
+  optional string redirect_url = 3;
+}
+
+// Message to change user's password.
+message PasswordChange
+{
+  // Currently used password.
+  required string old_password = 1;
+
+  // New password that user wants to use.
+  required string new_password = 2;
+}
+
+// Result of user password change (for PasswordChange and PasswordChangeRoutineClient messages).
+message PasswordChangeResult
+{
+  // Password change result.
+  enum ResultCode
+  {
+    /// success codes
+    // User password is changed successfully.
+    RESULT_CODE_SUCCESS = 0;
+
+    /// failure codes (100+)
+    // Incorrect user name or password.
+    RESULT_CODE_FAILURE = 101;
+
+    // The negotiation rules for PasswordChangeRoutineClient have been violated,
+    // e.g. user has specified several fields at once in one message.
+    RESULT_CODE_ROUTINE_ERROR = 102;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 1;
+
+  // Optional failure details.
+  optional string text_message = 2;
+}
+
+// Request for temporary user name and password for demo.
+// Clients of ObtainDemoCredentials are responsible to verify provided e-mail
+// (e.g. by sending passwords by e-mail only) and prevent possible abuse.
+// ObtainDemoCredentials requests are accepted
+// only if client IP address is in the list of allowed IP addresses for service requests.
+message ObtainDemoCredentials
+{
+  // Identifier of the client application as assigned by CQG.
+  required string client_app_id = 1;
+
+  // User first name.
+  required string first_name = 2;
+
+  // User second name.
+  required string second_name = 3;
+
+  // E-mail address of a user who requested demo access.
+  required string e_mail = 4;
+
+  // Private label identifies the Firm or Vendor that connects to the server,
+  // client_app_id field value is taken by default.
+  optional string private_label = 5;
+}
+
+message ObtainDemoCredentialsResult
+{
+  // Password change result.
+  enum ResultCode
+  {
+    /// success codes (0 - 100)
+    RESULT_CODE_SUCCESS = 0;
+
+    /// failure codes (100+)
+    RESULT_CODE_FAILURE = 101;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 1;
+
+  // demo user name.
+  optional string user_name = 2;
+
+  // demo password.
+  optional string password = 3;
+
+  // Optional details.
+  optional string text_message = 4;
+
+  // Unique user identification.
+  // Required in case of success.
+  optional sint32 user_id = 5;
+
+  // Expiration date/time in UTC as ISO 8601 string (e.g. '2013-04-03T14:23:20Z').
+  optional string expiration_utc = 6;
+}
+
+// Text message from server.
+message UserMessage
+{
+  // Type of the message.
+  enum MessageType
+  {
+    // Critical error message. Informs the user of a significant problem on an exchange or within CQG infrastructure.
+    // Possible problems: incomplete order or position information; a critical message from CQG Customer support;
+    // technical problems or news from an exchange; a critical message from exchange; do not logoff when this occurs.
+    // a critical problem loading trading or data enablements; protocol violation.
+    MESSAGE_TYPE_CRITICAL_ERROR = 1;
+
+    // Warning. Informs the user of an unexpected situation that does not affect the correctness of data, or a warning
+    // message from CQG Customer support.
+    MESSAGE_TYPE_WARNING = 2;
+
+    // General information. Informs the user of an intermittent problem with the realtime data,
+    // or an informational message from CQG Customer support.
+    MESSAGE_TYPE_INFO = 3;
+
+    // This message shouldn't be visible for users, only dumped into a log file.
+    MESSAGE_TYPE_LOG = 4;
+  }
+
+  // This field is associated with MessageType enum type.
+  required uint32 message_type = 1;
+
+  // Information about source of the message.
+  required string source = 2;
+
+  // Message subject.
+  optional string subject = 3;
+
+  // Message text.
+  required string text = 4;
+
+  // Optional time when this message is expired, it should be hidden from user after this time (UTC).
+  optional sint64 expiration_utc_time = 5;
+}
+
+// Request information about user session.
+// UserSessionState requests are accepted
+// only if client ip address is in the list of allowed IP addresses for service requests.
+message UserSessionStateRequest
+{
+  required string session_token = 1;
+}
+
+message UserSessionStateResult
+{
+  // Session token from UserSessionStateRequest.
+  required string session_token = 1;
+
+  enum ResultCode
+  {
+    //// success codes
+    // Data for requested session is found.
+    RESULT_CODE_SUCCESS = 0;
+
+    //// failure codes (100+)
+    // General failure.
+    RESULT_CODE_FAILURE = 101;
+
+    // Session is unknown to a server.
+    RESULT_CODE_UNKNOWN_SESSION = 102;
+
+    // The user is not allowed to access this data.
+    RESULT_CODE_ACCESS_DENIED = 103;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 2;
+
+  /// User session information.
+  optional sint32 user_id = 3;
+  optional string username = 4;
+}
+
+// Ping request which can be initiated by any side to ensure connection is alive. Both client and
+// server sides must respond such request with Pong.
+message Ping
+{
+  // Token routed back in Pong response.
+  optional string token = 1;
+
+  // UTC time when this request was composed. Used for network latency diagnostics.
+  required sint64 ping_utc_time = 2;
+}
+
+// Pong response which must be sent in response on Ping request.
+message Pong
+{
+  // Token passed in Ping request.
+  optional string token = 1;
+
+  // Corresponding value from Ping request.
+  required sint64 ping_utc_time = 2;
+
+  // UTC time when this response was composed.
+  required sint64 pong_utc_time = 3;
+}
+
+// Message to change max collapsing level for real-time market data.
+// If "market_data_bandwidth" was set for the session in Logon or RestoreOrJoinSession message, the request will fail.
+message SetCollapsingLevelRequest
+{
+  // Max collapsing level.
+  // This field is associated with RealTimeCollapsingLevel enum type.
+  // If max_collapsing_level is omitted then REAL_TIME_COLLAPSING_LEVEL_NONE will be used.
+  optional uint32 max_collapsing_level = 1;
+}
+
+// Response to SetCollapsingLevelRequest
+message SetCollapsingLevelResult
+{
+  enum ResultCode
+  {
+    //// success codes
+    // Maximum collapsing level has been successfully changed.
+    RESULT_CODE_SUCCESS = 0;
+
+    //// failure codes (100+)
+    // General failure.
+    RESULT_CODE_FAILURE = 101;
+
+    // market_data_bandwidth was set for the session in Logon or RestoreOrJoinSession message.
+    // Collapsing level cannot be set when market_data_bandwidth is set in Logon or RestoreOrJoinSession message.
+    RESULT_CODE_BANDWIDTH_IS_SET = 102;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 1;
+
+  // Possible details of status or failure.
+  optional shared_1.Text text_message = 2;
+
+  // Current value of max collapsing level.
+  // Field is set if result_code is RESULT_CODE_SUCCESS.
+  // If result_code is RESULT_CODE_SUCCESS and max_collapsing_level is omitted
+  // it should be treated as a REAL_TIME_COLLAPSING_LEVEL_NONE value.
+  optional uint32 max_collapsing_level = 3;
+}

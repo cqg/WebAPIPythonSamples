@@ -1,0 +1,20 @@
+// Representation of a decimal number
+
+syntax = "proto2";
+
+package cqg;
+
+option java_outer_classname = "DecimalProto";
+
+// Number is represented as a decimal floating point significand (limited by 64 bits including sign)
+// and 32-bit exponent.
+// The value represented is significand * (10 ^ exponent)
+message Decimal {
+  // Significand (aka mantissa) of the decimal.  Signed.
+  // It can have trailing zeros (not normalized).
+  optional sint64 significand = 1 [default = 0];
+
+  // Exponent of the decimal.
+  optional sint32 exponent = 2 [default = 0];
+}
+

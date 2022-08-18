@@ -1,0 +1,562 @@
+// Trade Routing messaging
+
+syntax = "proto2";
+
+package trade_routing_2;
+
+import "WebAPI/metadata_2.proto";
+import "WebAPI/order_2.proto";
+import "common/decimal.proto";
+import "common/shared_1.proto";
+import "google/protobuf/timestamp.proto";
+
+// Subscription to trade routing data and notifications about trading information updates.
+// Client can be subscribed to several publications.
+// If some account is subscribed by several publications then client will receive a separate snapshot per subscription
+// but one real time update with a list of subscriptions.
+message TradeSubscription
+{
+  // ID of a subscription that should be unique enough to match responses and updates with corresponding requests.
+  required uint32 id = 1;
+
+  // Scope of the subscription (provide a list).
+  enum SubscriptionScope
+  {
+    // Subscribe to order updates.
+    SUBSCRIPTION_SCOPE_ORDERS = 1;
+
+    // Subscribe to open positions and matched trades updates.
+    SUBSCRIPTION_SCOPE_POSITIONS = 2;
+
+    // Subscribe to collateral updates (current margin and purchasing power).
+    SUBSCRIPTION_SCOPE_COLLATERAL = 3;
+  }
+
+  // This field is associated with SubscriptionScope enum type.
+  // Request is rejected if subscription_scopes contains duplicates.
+  repeated uint32 subscription_scopes = 2;
+
+  // Type of the publication to subscribe.
+  enum PublicationType
+  {
+    // Subscribe to a single account.
+    PUBLICATION_TYPE_ACCOUNT = 1;
+
+    // Subscribe to all accounts of a specific sales series.
+    PUBLICATION_TYPE_SALES_SERIES = 2;
+
+    // Subscribe to all accounts of a specific brokerage.
+    PUBLICATION_TYPE_BROKERAGE = 3;
+
+    // Subscribe to all accounts this user is authorized for (default).
+    PUBLICATION_TYPE_ALL_AUTHORIZED = 4;
+  }
+
+  // This field is associated with PublicationType enum type.
+  optional uint32 publication_type = 3;
+
+  // Account ID when publicationType = PUBLICATION_TYPE_ACCOUNT.
+  optional uint32 account_id = 4;
+
+  // Sales series number when publicationType = PUBLICATION_TYPE_SALES_SERIES.
+  optional string sales_series_number = 5;
+
+  // Brokerage ID when publicationType = PUBLICATION_TYPE_BROKERAGE or PUBLICATION_TYPE_SALES_SERIES.
+  optional uint32 brokerage_id = 6;
+
+  // True to subscribe, false to unsubscribe (only id value is used to unsubscribe).
+  required bool subscribe = 7;
+
+  // Note: use last_order_update_utc_timestamp field instead.
+  optional sint64 last_order_update_utc_time = 8 [deprecated = true];
+
+  // Optionally limit request to receive information about orders
+  // that were updated/added after specified server related time (inclusive).
+  // It is used to reduce amount of information necessary to send after re-connection.
+  // Client should be ready for duplicates that have to be detected by corresponding IDs.
+  // If specified it's used instead of last_order_update_utc_time field.
+  optional google.protobuf.Timestamp last_order_update_utc_timestamp = 14;
+
+  // True means sending only real time data and skip sending an initial orders snapshot,
+  // send initial snapshot otherwise.
+  // NOTE: do not set this attribute after restoring session since some events might be missed to be delivered,
+  // use last_order_update_utc_time instead.
+  // NOTE: when set to True, WebAPI server does not send order snapshots for accounts authorized during
+  // the subscription.
+  optional bool skip_orders_snapshot = 9;
+
+  // True means sending only FCM confirmed positions and their updates (if subscribed)
+  // without matching with current day fills, send matched net positions otherwise.
+  optional bool confirmed_positions_only = 10;
+
+  // Positions matching algorithm (for position subscription).
+  enum MatchingAlgorithm
+  {
+    // First In, First Out.
+    // The first order filled is the first order offset when an order on the opposite side of the market is executed.
+    MATCHING_ALGORITHM_FIFO = 1;
+
+    // High Buy, High Sell. The highest buy is matched with the highest sell.
+    MATCHING_ALGORITHM_HBHS = 2;
+
+    // Last In, First Out.
+    // The last order filled is the first order offset when an order on the opposite side of the market is executed.
+    MATCHING_ALGORITHM_LIFO = 3;
+  }
+
+  // This field is associated with MatchingAlgorithm enum type.
+  // MATCHING_ALGORITHM_FIFO is used if omitted.
+  // Applicable only for contracts with ContractMetadata.position_tracking = POSITION_TRACKING_TYPE_NET_POSITION.
+  // For other contract types it is always MATCHING_ALGORITHM_FIFO.
+  optional uint32 matching_algorithm = 11;
+
+  // If true or omitted then intraday trades are matched first
+  // and then intraday leftover is matched against previous close positions.
+  // If false then previous day open positions and intraday fills are matched in a single pass.
+  // Applicable only for contracts with ContractMetadata.position_tracking = POSITION_TRACKING_TYPE_NET_POSITION.
+  // For other contract types it is always false.
+  optional bool match_intraday_first = 12;
+
+  // This field is associated with MatchingAlgorithm enum type.
+  // Historical positions Matching algorithm. The same as matching_algorithm if omitted.
+  // It is ignored if match_intraday_first is false.
+  // Applicable only for contracts with ContractMetadata.position_tracking = POSITION_TRACKING_TYPE_NET_POSITION.
+  optional uint32 historical_matching_algorithm = 13;
+
+  // If this field set to true, statuses on orders with ORDER_TYPE_CROSS type will be
+  // included into responses. See CrossOrderParameters message.
+  // Note that order statuses with cross order type are excluded from snapshot only if 
+  // include_cross_orders set to false (or empty) and ORDER_TYPE_CROSS type is not included 
+  // into order_snapshot_filter.order_types.
+  optional bool include_cross_orders = 15;
+
+  // Only order statuses that match the filter are included in a snapshot.
+  // By default no filtration is done by the filter.
+  // Affects result for scope SUBSCRIPTION_SCOPE_ORDERS.
+  // Note that snapshot might still include additional data in responses (e.g. when multiple trade
+  // subscriptions with different snapshot filters are requested).
+  optional OrderSnapshotFilter order_snapshot_filter = 16;
+}
+
+// Server status for a trade subscription.
+// It is sent before or along with a snapshot of initial status information.
+message TradeSubscriptionStatus
+{
+  // Subscription Id this result is sent for.
+  required uint32 id = 1;
+
+  // Possible result codes.
+  enum StatusCode
+  {
+    // success codes (0 - 99)
+    STATUS_CODE_SUCCESS = 0;
+
+    // Currently subscription is [partially] disconnect because of communication issues.
+    // NOTE: Clients should not resubscribe in this case, the server will restore subscription with
+    // sending SUCCESS status once communication issues are resolved following with all necessary data updates.
+    STATUS_CODE_DISCONNECTED = 1;
+
+    // failure codes (100+)
+    STATUS_CODE_FAILURE = 101;
+
+    // The limit of the subscriptions has been violated.
+    STATUS_CODE_SUBSCRIPTION_LIMIT_VIOLATION = 102;
+
+    // Unknown or ambiguous account, sales series number, or brokerage id in the subscription.
+    STATUS_CODE_INVALID_PUBLICATION_ID = 103;
+
+    // The limit of subscribed accounts has been violated.
+    STATUS_CODE_SUBSCRIBED_ACCOUNTS_LIMIT_VIOLATION = 104;
+  }
+
+  // Subscription result.
+  // This field is associated with StatusCode enum type.
+  required uint32 status_code = 2;
+
+  // Note: use 'details' instead.
+  optional string text_message = 3 [deprecated = true];
+
+  // Optional details.
+  optional shared_1.Text details = 4;
+}
+
+// Indicator that a snapshot of requested information is delivered and corresponding data is complete.
+message TradeSnapshotCompletion
+{
+  // ID of a corresponding trade subscription.
+  required uint32 subscription_id = 1;
+
+  // List of subscription scopes whose snapshots are completed.
+  // Completion message for one scope is sent only once but they can be combined
+  // (e.g. one completion message might come for ORDERS and another one later for POSITIONS and COLLATERAL).
+  // This field is associated with TradeSubscription.SubscriptionScope enum type.
+  repeated uint32 subscription_scopes = 2;
+}
+
+// These rules are only applied for the snapshot.
+// See order_2.OrderStatus.is_snapshot.
+message OrderSnapshotFilter
+{
+  // Order statuses with these values of OrderStatus.status field are included in a snapshot.
+  // This field is associated with shared_1.OrderStatus.Status enum type.
+  // If empty, there is no filtration by the field.
+  repeated uint32 order_statuses = 1;
+
+  // Order statuses include transactions that match the filter.
+  // If empty, no filtration is done by the filter.
+  optional TransactionStatusFilter transaction_status_filter = 2;
+
+  // Order statuses with these values of Order.order_type field are included in a snapshot.
+  // This field is associated with OrderType enum type.
+  // If empty, there is no filtration by the field.
+  repeated uint32 order_types = 3;
+}
+
+message TransactionStatusFilter
+{
+  // No transactions are sent.
+  // Request is rejected if skip_transactions is true and transaction_statuses field is not empty.
+  optional bool skip_transactions = 1;
+
+  // Transaction statuses with these values of TransactionStatus.status are sent.
+  // If empty, there is no filtration by the field.
+  // This field is associated with shared_1.TransactionStatus.Status enum type.  
+  // Request is rejected if skip_transactions is true and transaction_statuses field is not empty.
+  repeated uint32 transaction_statuses = 2;
+}
+
+// Status of a contract open positions and purchase and sales for a specific account for the current day
+// (contractId and accountId are used as a key for updates).
+// Contract position is deleted when all open positions and purchase and sales groups are deleted.
+message PositionStatus
+{
+  // List of trade subscription IDs this status is related to.
+  repeated uint32 subscription_ids = 1;
+
+  // True if this is a snapshot related message.
+  // Since snapshot might be sent in several messages (including none),
+  // client should use TradeSnapshotCompletion message as an indicator of complete snapshot delivery.
+  optional bool is_snapshot = 2;
+
+  // Account this position belongs to.
+  required sint32 account_id = 3;
+
+  // Contract ID assigned by server.
+  required uint32 contract_id = 4;
+
+  // True if open positions are short (result of sell operations), long otherwise.
+  // In case of separated long and short positions the value is true if the cumulative position is short or flat,
+  // the value is false if the cumulative position is long.
+  // The attribute is deprecated, refer to OpenPosition.is_short instead.
+  required bool is_short_open_position = 5 [deprecated = true];
+
+  // List of new/ updated or deleted open positions.
+  // NOTE: full list is sent only in a snapshot, updates include only added, changed and deleted records.
+  repeated OpenPosition open_positions = 6;
+
+  // List of purchase and sales groups. This group represent offset trades (usually one sell and one buy).
+  // NOTE: full list is sent only in a snapshot, updates include only added, changed and deleted records.
+  repeated PurchaseAndSalesGroup purchase_and_sales_groups = 7;
+
+  // Multiple OrderStatus and PositionStatus messages in a single ServerMsg can reference the same contract.
+  // If the contract is unknown to the client before this ServerMsg,
+  // contract meta-data will be added in at least one of them.
+  // If in your code you process orders first and positions second then during processing orders you may
+  // encounter order with yet unknown contract_id.
+  // In this case you should look for matching contract metadata in positions.
+  // The opposite is also true: contract metadata for positions can be in order status messages.
+  optional metadata_2.ContractMetadata contract_metadata = 8;
+
+  // Sum of today fill commissions per currency for the contract.
+  // Aggregated value from TransactionStatus.fill_commission for current day orders.
+  repeated order_2.Commission today_fill_commissions = 9;
+}
+
+// Account and contract open position.
+// There could be more than one position per account and contract.
+// (id is used as a key for updates).
+message OpenPosition
+{
+  // Surrogate id as a key for updates.
+  required sint32 id = 1;
+
+  // Note: use qty field instead.
+  optional uint32 uint32_qty = 2 [deprecated = true];
+
+  // Position size, zero means that this position is deleted.
+  // Note: quantity can be safely compared to zero, because this is an integral number of
+  // ContractMetadata.volume_scale units.
+  optional cqg.Decimal qty = 12;
+
+  // Position average price.
+  // NOTE: Since it could be an aggregated position price is sent in correct format directly.
+  required double price_correct = 3;
+
+  // Exchange specific trade date when the position was open or last changed (date only value).
+  required sint64 trade_date = 4;
+
+  // Statement date (date value only).
+  required sint64 statement_date = 5;
+
+  // UTC trade time (including date) if available, it might not be available e.g. for the previous day positions.
+  // Note: use trade_utc_timestamp field instead.
+  optional sint64 trade_utc_time = 6 [deprecated = true];
+
+  // UTC trade time (including date) if available, it might not be available e.g. for the previous day positions.
+  optional google.protobuf.Timestamp trade_utc_timestamp = 8;
+
+  // True if the price is an aggregated position price.
+  required bool is_aggregated = 7;
+
+  // True if the open position is short (result of a sell operation), long otherwise.
+  // Undefined for deleted position (qty is 0).
+  required bool is_short = 9;
+
+  // Whether it is a yesterday or a today position.
+  // NOTE: where available, this attribute is from the exchange trade date perspective. It is used for
+  // position tracking and open/close instructions. It is not the same as previous day (associated
+  // with brokerage statement) vs. intraday. It is also not static. For example, an intraday fill
+  // with open_close_effect=OPEN will appear, when it is received during the trading session, in an open
+  // position or matched trade with is_yesterday=false. After the exchange trade date rolls over for
+  // that contract, and before the brokerage statement arrives reflecting it as a previous day position,
+  // the same open position or matched trade will contain is_yesterday=true.
+  optional bool is_yesterday = 10 [default = false];
+
+  // Speculation type of the position. One of SpeculationType enum.
+  optional uint32 speculation_type = 11;
+}
+
+// Purchase and sales group that represents offset trades (usually one sell and one buy trade).
+message PurchaseAndSalesGroup
+{
+  // Surrogate id as a key for updates.
+  required sint32 id = 1;
+
+  // Profit/ loss (in contract currency) of the group.
+  required double realized_profit_loss = 2;
+
+  // List of matched trades in a group.
+  // In case of group updates the whole list is sent.
+  repeated MatchedTrade matched_trades = 3;
+}
+
+// Specific trade or position that is a part of a purchase and sales group.
+// (id is used as a key for updates).
+message MatchedTrade
+{
+  // Note: use qty field instead.
+  optional uint32 uint32_qty = 1 [deprecated = true];
+
+  // Matched size.
+  // Zero means matched trade is deleted.
+  // Note: quantity can be safely compared to zero, because this is an integral number of
+  // ContractMetadata.volume_scale units.
+  optional cqg.Decimal qty = 12;
+
+  // True if this is a short trade (e.g. result of sell operation), long otherwise.
+  optional bool is_short = 2;
+
+  // Trade or position average price.
+  // NOTE: Since it could be an aggregated position price is sent in correct format directly.
+  required double price = 3;
+
+  // Trade date (date value only).
+  required sint64 trade_date = 4;
+
+  // Statement date (date value only).
+  required sint64 statement_date = 5;
+
+  // UTC trade time (including date) if available, it might not be available e.g. for the previous day positions.
+  // Note: use trade_utc_timestamp field instead.
+  optional sint64 trade_utc_time = 6 [deprecated = true];
+
+  // UTC trade time (including date) if available, it might not be available e.g. for the previous day positions.
+  optional google.protobuf.Timestamp trade_utc_timestamp = 8;
+
+  // True if the price is an aggregated position price.
+  required bool is_aggregated = 7;
+
+  // Whether the trade is of a yesterday or a today position.
+  // NOTE: where available, this attribute is from the exchange trade date perspective. It is used for
+  // position tracking and open/close instructions. It is not the same as previous day (associated
+  // with brokerage statement) vs. intraday. It is also not static. For example, an intraday fill
+  // with open_close_effect=OPEN will appear, when it is received during the trading session, in an open
+  // position or matched trade with is_yesterday=false. After the exchange trade date rolls over for
+  // that contract, and before the brokerage statement arrives reflecting it as a previous day position,
+  // the same open position or matched trade will contain is_yesterday=true.
+  optional bool is_yesterday = 9 [default = false];
+
+  // Whether the trade closed a new position or opened a new one.
+  // Applicable only if ContractMetadata.position_tracking is not POSITION_TRACKING_TYPE_NET_POSITION.
+  optional bool is_close = 10;
+
+  // Speculation type of the trade. One of SpeculationType enum.
+  optional uint32 speculation_type = 11;
+}
+
+// Status of the collateral for a specific account.
+// An update is sent once it is changed, updates might be consolidated in case of frequent changes.
+message CollateralStatus
+{
+  // List of trade subscription IDs this status is related to.
+  repeated uint32 subscription_ids = 1;
+
+  // True if this is a snapshot related message.
+  // Since snapshot might be sent in several messages (including none),
+  // client should use TradeSnapshotCompletion message as
+  // an indicator of complete snapshot delivery for a particular subscription.
+  optional bool is_snapshot = 2;
+
+  // Account id of this status.
+  required sint32 account_id = 3;
+
+  // Currency code of margin and PP values (ISO 4217 based).
+  required string currency = 4;
+
+  // Margin requirement calculated for worst-case based on open positions and working orders.
+  required double total_margin = 5;
+
+  // Margin requirement based on current positions only.
+  optional double position_margin = 11;
+
+  // Available account funds including balance, realized profit (or loss), collateral and credits.
+  // OTE and MVO are included regarding the account risk parameters.
+  required double purchasing_power = 6;
+
+  // Open trade equity, or potential profit (or loss) from futures and future-style options positions
+  // based on opening price of the position and the current future trade/best bid/best ask
+  // (regarding to the risk account settings) or settlement price if trade is not available.
+  // Included if purchasing power depends on it.
+  optional double ote = 7;
+
+  // Market value of options calculated as the current market trade/best bid/best ask of the option
+  // (regarding to the risk account settings) times the number of options
+  // (positive for long options and negative for short options) in the portfolio.
+  // Included if purchasing power depends on it.
+  optional double mvo = 8;
+
+  // Market value of futures calculated as the current market trade/best bid/best ask
+  // (regarding to the risk account settings) times the number of futures
+  // (positive for long and negative for short) in the portfolio.
+  // Included if applicable.
+  optional double mvf = 10;
+
+  // Allowable margin credit of the account.
+  optional double margin_credit = 9;
+
+  // UTC server time (including date) when the status was formed.
+  optional google.protobuf.Timestamp status_utc_timestamp = 12;
+}
+
+// Historical orders request.
+message HistoricalOrdersRequest
+{
+  // Only orders from specified business date (inclusively) is to be returned (date only value in time format).
+  // Note: Starting date must not be more than 30 days back from now.
+  required sint64 from_date = 1;
+
+  // Only orders till specified business date (inclusively) is to be returned (date only value in time format).
+  // Current business day if the field is omitted.
+  optional sint64 to_date = 2;
+
+  // Filter orders by account. It is required to leave account_ids list empty to select all accounts of the user.
+  repeated sint32 account_ids = 3;
+
+  // If this field set to true, statuses on orders with ORDER_TYPE_CROSS type will be
+  // included into responses. See CrossOrderParameters message.
+  // Note that order statuses with cross order type are excluded only if 
+  // include_cross_orders set to false (or empty) and ORDER_TYPE_CROSS type is not included 
+  // into order_snapshot_filter.order_types.
+  optional bool include_cross_orders = 4;
+
+  // Only order statuses, transaction statuses that match the filter are included in a report.
+  // By default no filtration is done by the filter.
+  optional OrderSnapshotFilter order_snapshot_filter = 5;
+
+  // No more than specified number of order statuses will be returned.
+  // Zero or omitted means no limit.
+  // If there are more order statuses than specified, HistoricalOrdersReport.order_status_limit_reached is set in true
+  // in last report for the request.
+  optional uint32 max_order_status_count = 6;
+
+  // No more than specified number of transaction statuses within all order statuses will be returned.
+  // Zero or omitted means no limit.
+  // If there are more transaction statuses than specified, HistoricalOrdersReport.transaction_status_limit_reached
+  // is set in true in last report for the request.
+  // Note: Limitation is aligned on order status. So, if next order status transaction count leads to limit violation
+  // whole order status is not included into the report.
+  optional uint32 max_transaction_status_count = 7;
+}
+
+// Response for historical orders request.
+message HistoricalOrdersReport
+{
+  // List of order statuses matching historical order filter.
+  repeated order_2.OrderStatus order_statuses = 1;
+
+  // Indicator that not all order statuses are returned. 
+  // Limit by HistoricalOrdersRequest.max_order_status_count is reached.
+  optional bool order_status_limit_reached = 2;
+
+  // Indicator that not all order statuses are returned. 
+  // Limit by HistoricalOrdersRequest.max_transaction_status_count is reached.
+  optional bool transaction_status_limit_reached = 3;
+}
+
+// Request for trading feature entitlements.
+message BrokerageTradingFeatureEntitlementRequest
+{
+  // Account ID in CQG trade routing system.
+  // If no account supplied, data is returned for ALL accounts trader is authorized on.
+  repeated sint32 account_ids = 1;
+}
+
+// Report with trading feature entitlements.
+message BrokerageTradingFeatureEntitlementReport
+{
+  // Set of trading feature entitlements.
+  repeated TradingFeatureEntitlementEntry trading_feature_entitlements = 1;
+}
+
+// Account/brokerage-specific trading feature entitlement.
+// For future compatibility unknown entitlements should be ignored.
+message TradingFeatureEntitlementEntry
+{
+  // Account ID in CQG trade routing system that corresponds to trading feature entitlement.
+  optional sint32 account_id = 1;
+
+  // Trading feature entitlement.
+  // This field is associated with TradingFeatureEntitlement enum type.
+  optional uint32 entitlement = 2;
+}
+
+// Trading feature entitlements.
+enum TradingFeatureEntitlement
+{
+  // Disallow skipping non-fast click confirmations.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_SKIP_NON_FAST_CLICK_CONFIRMATIONS = 3;
+
+  // Disallow skipping Responsive DOMTrader fast click confirmations.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_SKIP_NON_DDT_FAST_CLICK_CONFIRMATIONS = 4;
+
+  // Disallow Heads Up.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_HEADS_UP = 5;
+
+  // Disallow Order View.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_ORDER_VIEW = 6;
+
+  // Disallow Responsive DOMTrader.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_RESPONSIVE_DOM_TRADER = 8;
+
+  // Disallow Dynamic DOMTrader.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_DYNAMIC_DOM_TRADER = 9;
+
+  // Disallow buy/sell fast click.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_BUY_SELL_FAST_CLICK = 11;
+
+  // Disallow skipping Dynamic DOMTrader fast click confirmations.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_SKIP_DDT_FAST_CLICK_CONFIRMATIONS = 12;
+
+  // Disallow skipping force order confirmation.
+  TRADING_FEATURE_ENTITLEMENT_DISALLOW_SKIP_FORCE_ORDER_CONFIRMATION = 13;
+}

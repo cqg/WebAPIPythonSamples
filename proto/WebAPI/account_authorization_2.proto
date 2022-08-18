@@ -1,0 +1,131 @@
+// Messages for accounts that require separate authorization process
+syntax = "proto2";
+
+package account_authorization_2;
+
+import "common/shared_1.proto";
+import "google/protobuf/timestamp.proto";
+
+//// Messages for accounts that require separate authorization process.
+// Only one request per account is allowed for simultaneous processing.
+
+// Account level Logon Request. One-step logon procedure.
+message AccountLogon
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+
+  // User login name for this account.
+  required string username = 2;
+
+  // User's password for this account.
+  required string password = 3;
+}
+
+// Account level Logon result.
+message AccountLogonResult
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+
+  enum ResultCode
+  {
+    //// success codes
+    // User is logged in to the system. Account connection status becomes CONNECTED.
+    RESULT_CODE_SUCCESS = 0;
+
+    // Account password change required after the first logon of new account.
+    // Account connection status remains CONNECTING.
+    RESULT_CODE_PASSWORD_CHANGE_REQUIRED = 1;
+
+    // Account password expired. Account connection status remains CONNECTING.
+    RESULT_CODE_PASSWORD_EXPIRED = 2;
+
+    //// failure codes (100+), account connection status is reset to DISCONNECTED.
+    // General failure.
+    RESULT_CODE_FAILURE = 101;
+  }
+
+  // One of the logon result codes.
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 2;
+
+  // Optional logon result message for failure details.
+  optional shared_1.Text text_message = 3;
+
+  // Time when the message was sent.
+  required google.protobuf.Timestamp server_utc_timestamp = 4;
+}
+
+// Account level password change request.
+message AccountPasswordChange
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+
+  // Currently used password.
+  required string old_password = 2;
+
+  // New password that user wants to use.
+  required string new_password = 3;
+}
+
+// Account level password change result.
+message AccountPasswordChangeResult
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+
+  // Password change result.
+  enum ResultCode
+  {
+    /// success codes
+    // User password is changed successfully.
+    RESULT_CODE_SUCCESS = 0;
+
+    /// failure codes (100+)
+    // Most likely incorrect user name or password.
+    RESULT_CODE_FAILURE = 101;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 2;
+
+  // Optional failure details.
+  optional shared_1.Text text_message = 3;
+}
+
+// Account level Logoff request.
+message AccountLogoff
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+}
+
+// Account level Logoff result.
+message AccountLogoffResult
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+
+  // Logoff result.
+  enum ResultCode
+  {
+    /// success codes
+    // Logoff was successful.
+    RESULT_CODE_SUCCESS = 0;
+
+    /// failure codes (100+)
+    // Logoff failed.
+    RESULT_CODE_FAILURE = 101;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 2;
+
+  // Optional failure description.
+  optional shared_1.Text text_message = 3;
+
+  // Time when the message was sent.
+  required google.protobuf.Timestamp server_utc_timestamp = 4;
+}

@@ -1,0 +1,69 @@
+// Instrument definition messages
+
+syntax = "proto2";
+
+package instrument_definition_2;
+
+import "WebAPI/metadata_2.proto";
+import "google/protobuf/timestamp.proto";
+
+// Message describing a user-defined (non-strategy) instrument, e.g. a flex option.
+// Which attributes may be specified, and in what combination, is exchange-specific.
+// Contact CQG for more information about supported exchanges, attributes, and usage conventions.
+message InstrumentDefinition
+{
+  // Symbol of the underlying contract, in exchange-specific format.
+  // This is a required field.
+  optional string underlying_contract_symbol = 1;
+
+  // CQG base instrument type.
+  // One of metadata_2.CQGInstrumentType enums.
+  // This is a required field.
+  optional uint32 cqg_instrument_type = 2;
+
+  // Maturity timestamp.
+  // (local exchange date in timestamp format, use date part only).
+  // This is a required field.
+  optional google.protobuf.Timestamp maturity_timestamp = 3;
+
+  // Exchange-specific instrument type, if required by exchange.
+  // Allowed type strings depend on exchange convention.
+  optional string exchange_instrument_type = 4;
+
+  // Settlement method, if required by exchange.
+  // One of metadata_2.SettlementMethod enums.
+  optional uint32 settlement_method = 5;
+
+  // Option strike value, for options only.
+  // Value will be passed as-is to exchange.
+  optional double strike = 6;
+
+  // Exercise style, for options only, if required by exchange.
+  // One of metadata_2.ExerciseStyle enums.
+  optional uint32 exercise_style = 7;
+
+  // Pricing convention, if required by exchange.
+  // One of metadata_2.PricingConvention enums.
+  optional uint32 pricing_convention = 8;
+}
+
+// Request to define a non-strategy as a contract.
+message InstrumentDefinitionRequest
+{
+  // Instrument to define.
+  // This is a required field.
+  optional instrument_definition_2.InstrumentDefinition instrument_definition = 1;
+
+  // Account ID in CQG trade routing system.
+  // Some exchanges require an account ID in the process of defining an instrument.
+  // For those exchanges this is a required field.
+  optional sint32 account_id = 2;
+}
+
+// Report of the contract metadata assigned to the instrument.
+message InstrumentDefinitionReport
+{
+  // Assigned instrument metadata.
+  // This is a required field.
+  optional metadata_2.ContractMetadata contract_metadata = 1;
+}

@@ -1,0 +1,808 @@
+// Public metadata related messages.
+
+syntax = "proto2";
+
+package metadata_2;
+
+import "WebAPI/metadata_admin_2.proto";
+import "WebAPI/strategy_definition_2.proto";
+import "common/decimal.proto";
+import "common/shared_1.proto";
+
+// Request to resolve a symbol pattern or specific symbol identifier
+// to a specific contract with optional subscription for meta-data updates.
+// Symbol resolution rules:
+//   a) If the requested symbol points to a symbol prefix rather than a specific contract
+//      then it is resolved into the most active contract for this symbol prefix (e.g. 'EP' is resolved to 'EPU3').
+//      The update is sent when an active contract is changed (e.g. the update might contain the following 'EPZ3').
+//   b) If the requested symbol points to a specific contract which last trading date
+//      was less than 30 days ago (by default) SymbolResolutionReport is returned with 'deleted' field set to True.
+//      Else if contract's last trading day was more than 30 days ago (by default)
+//      status code NOT_FOUND is returned in InformationReport.
+//   c) If the requested symbol points to a specific contract that is tradable right now then it is resolved to itself.
+//      Update is sent only when meta-data for such contract is changed or expired.
+//      In case of expiration SymbolResolutionReport is returned with 'deleted' field set to True.
+//   d) If requested symbol points to an option instrument without specific month and strike
+//      it is resolved to the lead (first non-spot) month of the underlying future or its own front month
+//      if the underlying contract is not a future (e.g. 'C.EP' is resolved to 'C.EPU131600').
+//      Update is sent only when the resolved option contract is expired
+//      (strike is not updated to follow underlying contract market price).
+//   e) If requested symbol is a symbol prefix that follows '?N' or '??N' (where N is number, e.g. EP?2)
+//      then it is resolved to Nth nearest contract.
+//      N = 1 means 'front' contract, N = 2 means the nearest contract that follows the front, etc.
+//      '?' and '??' are different for futures only
+//      and '?' means Nth nearest regular future and '??' means Nth nearest spot or regular future.
+//      Update is sent when the front contract expired
+//      and replaced with the following contract (relative position change).
+//      N = 0 is a special case that means 'most active' contract which works the same way as (a)
+// NOTE: Available and active contract lists are updated within 24 hours
+//       of an expiring contract's final trading session.
+//       Meta-data updates for affected contracts, when a subscription is present, are sent when the list updates occur.
+//       Initial resolution requests use the same lists, so the best way to avoid inconsistency
+//       and unnecessary server load is to subscribe and process updates when notified.
+message SymbolResolutionRequest
+{
+  // Symbol pattern to resolve.
+  // It is required field.
+  optional string symbol = 1;
+
+  // Reserved for internal use.
+  extensions 100 to 199;
+}
+
+// Symbol resolution result or update.
+message SymbolResolutionReport
+{
+  // Resolved contract meta-data.
+  required ContractMetadata contract_metadata = 1;
+
+  // Contract is expired (used for updates).
+  optional bool deleted = 2;
+}
+
+// Request contract metadata by contract ID.
+message ContractMetadataRequest
+{
+  // contract ID to request the metadata.
+  required uint32 contract_id = 1;
+}
+
+// Report with the requested contract metadata.
+message ContractMetadataReport
+{
+  // Requested metadata if successfully found.
+  optional ContractMetadata contract_metadata = 1;
+}
+
+// Describes tick size and value, and the range of prices they apply in.
+message TickSizeByPrice
+{
+  // Size or a single market tick in correct price format.
+  required double tick_size = 1;
+
+  // Contract tick money value in the contract's currency.
+  // Zero if not applicable (e.g. for indexes).
+  required double tick_value = 2;
+
+  // Boundary of a half-open price range.
+  // Minimum for positive values but maximum for negative values.
+  // - Negative value defines (prev-price <- boundary_price] range
+  // - Positive value defines [boundary_price -> next-price) range
+  // - Zero value defines (highest-negative-price <- 0] and [0 -> lowest-positive-price)
+  // The price is in correct price format.
+  required double boundary_price = 3;
+}
+
+// Describes tick size and value applied within some range of dates.
+message TickSizeByDateTillExpiration
+{
+  // Id of the record.  Starts from 0.  The record with id of 0 applies immediately before contract expiration, id of 1
+  // applies before 0th, etc.
+  required uint32 id = 1;
+
+  // Size or a single market tick in correct price format.
+  required double tick_size = 2;
+
+  // Contract tick money value in the contract's currency.
+  // Zero if not applicable (e.g. for indexes).
+  required double tick_value = 3;
+}
+
+// Metadata used for real-time and trading data conversion.
+message ConversionMetadata
+{
+  // Identifier of the currency contract used for price conversion.
+  optional uint32 currency_rate_contract_id = 1;
+
+  // Identifier of the currency contract used for hedging conversion.
+  optional uint32 currency_hedge_contract_id = 2;
+}
+
+// Way how to track the trader's open positions on a given contract.
+enum PositionTrackingType
+{
+  // Difference between long and short open positions is tracked.
+  POSITION_TRACKING_TYPE_NET_POSITION = 1;
+
+  // Long and short open positions are tracked separately.
+  POSITION_TRACKING_TYPE_LONG_SHORT_WITH_IMPLIED_CLOSE = 2;
+
+  // Long and short as well as today and yesterday open positions are tracked separately.
+  // The explicit order instruction to close either today or yesterday is taken into account.
+  POSITION_TRACKING_TYPE_LONG_SHORT_WITH_EXPLICIT_CLOSE = 3;
+}
+
+// Recommended display mode for prices.
+// The rules are applied according to the display scale of a contract.
+// For combined scales like Eighths of Thirty Seconds the mode is applied only to the minor fractions (Eighths) while
+// the major fractions (Thirty Seconds) always shown in PRICE_DISPLAY_MODE_NUMERATOR mode.
+// Sample: TRUNCATED mode for 108 22/32 with extra 7/8 of 1/32 (108 + 22/32 + 7/256)
+// is shown as 108'228 where 8 is calculated as 7/8 -> truncate (0.875) -> 8 (see TRUNCATED sample below).
+enum PriceDisplayMode
+{
+  // The numerator of the fractional part is shown directly.
+  // Samples: for 3/8 the fractional part is shown as '3', for 7/16 - '07', for 15/100 - '15' etc.
+  PRICE_DISPLAY_MODE_NUMERATOR = 0;
+
+  // Rounded decimal. In this mode the fractional part is converted to the decimal fraction
+  // and then rounded to the minimum digits which are necessary to recognize the price.
+  // Samples: 3/8 -> round(0.375) -> '4', 7/8 ¨C round(0.875) -> '9', 11/16 -> round(0.6875) -> '69'.
+  // It means the same as PRICE_DISPLAY_MODE_NUMERATOR for decimal scales.
+  PRICE_DISPLAY_MODE_ROUNDED  = 1;
+
+  // Truncated decimal. In this mode the fractional part is converted to the decimal fraction
+  // and then truncated to the minimum digits which are necessary to recognize the price.
+  // Samples: 3/8 -> truncate(0.375) -> '3', 7/8 -> truncate (0.875) -> '8', 11/16 -> truncate (0.6875) -> '68'.
+  // It means the same as PRICE_DISPLAY_MODE_NUMERATOR for decimal scales.
+  PRICE_DISPLAY_MODE_TRUNCATED = 2;
+}
+
+// Describes period value type.
+// See example in ContractMetadata.period_type and ContractMetadata.period_value.
+enum PeriodType
+{
+  PERIOD_TYPE_MONTH = 0;
+  PERIOD_TYPE_QUARTER = 1;
+  PERIOD_TYPE_SEMI_ANNUAL = 2;
+  PERIOD_TYPE_YEAR = 3;
+  PERIOD_TYPE_DAY_OF_WEEK = 4;
+  PERIOD_TYPE_DAY_OF_MONTH = 5;
+  PERIOD_TYPE_DAY_OF_YEAR = 6;
+  PERIOD_TYPE_WEEK_OF_MONTH = 7;
+  PERIOD_TYPE_WEEK_OF_YEAR = 8;
+  PERIOD_TYPE_SECOND = 9;
+  PERIOD_TYPE_MINUTE = 10;
+  PERIOD_TYPE_HOUR = 11;
+  PERIOD_TYPE_DATE = 12;
+}
+
+// CQG base instrument types eligible for user defined instrument requests.
+enum CQGInstrumentType
+{
+  // Future or other instruments defined as a future in CQG, e.g. for some
+  // exchanges, this includes forwards.
+  CQG_INSTRUMENT_TYPE_FUTURE = 1;
+
+  // Call option.
+  CQG_INSTRUMENT_TYPE_CALL_OPTION = 2;
+
+  // Put option.
+  CQG_INSTRUMENT_TYPE_PUT_OPTION = 3;
+}
+
+// Settlement method.
+enum SettlementMethod
+{
+  // Cash settled.
+  SETTLEMENT_METHOD_CASH = 1;
+
+  // Physically delivered.
+  SETTLEMENT_METHOD_PHYSICAL = 2;
+}
+
+// Exercise style.
+enum ExerciseStyle
+{
+  // European exercise style.
+  EXERCISE_STYLE_EUROPEAN = 1;
+
+  // American exercise style.
+  EXERCISE_STYLE_AMERICAN = 2;
+}
+
+// Pricing convention aka return type.
+enum PricingConvention
+{
+  // Price return.
+  PRICING_CONVENTION_PRICE = 1;
+
+  // Gross return.
+  PRICING_CONVENTION_GROSS = 2;
+
+  // Net return.
+  PRICING_CONVENTION_NET = 3;
+}
+
+message ContractMetadata
+{
+  // Server assigned ID for a contract, it is not the same across sessions.
+  required uint32 contract_id = 1;
+
+  // Full contract symbol.
+  required string contract_symbol = 2;
+
+  // Full contract symbol in CQG dialect.
+  optional string cqg_contract_symbol = 70;
+
+  // Scale to convert prices from this protocol to correct prices
+  // (correctPrice = price * correctPriceScale).
+  required double correct_price_scale = 3;
+
+  // Display Price Scale is a number that defines conversion of float correct price to
+  // a 'native' integer display format and back.
+  // Below is the table of possible scale values.
+  // -------------------------------------------------------
+  // | Scale |       Name            |    Description      |
+  // -------------------------------------------------------
+  // | 0     |One                     |Don't scale         |
+  // | 1     |TenMinusOne             |Divide by 10        |
+  // | 2     |TenMinusTwo             |Divide by 100       |
+  // | 3     |TenMinusThree           |Divide by 1000      |
+  // | 4     |TenMinusFour            |Divide by 10000     |
+  // | 5     |TenMinusFive            |Divide by 100000    |
+  // | 6     |TenMinusSix             |Divide by 1000000   |
+  // | 7     |TenMinusSeven           |Divide by 10000000  |
+  // | 8     |TenMinusEight           |Divide by 100000000 |
+  // | 9     |TenMinusNine            |Divide by 1000000000|
+  // | 10    |TenMinusTen             |Divide by 10^10     |
+  // | 11    |TenMinusEleven          |Divide by 10^11     |
+  // | 12    |TenMinusTwelve          |Divide by 10^12     |
+  // | 13    |TenMinusThirteen        |Divide by 10^13     |
+  // | 14    |TenMinusFourteen        |Divide by 10^14     |
+  // | 15    |TenMinusFifteen         |Divide by 10^15     |
+  // | 101   |Halves                  |Divide by 2         |
+  // | 102   |Fourths                 |Divide by 4         |
+  // | 103   |Eighths                 |Divide by 8         |
+  // | 104   |Sixteenths              |Divide by 16        |
+  // | 105   |ThirtySeconds           |Divide by 32        |
+  // | 106   |SixtyFourths            |Divide by 64        |
+  // | 107   |OneHundredTwentyEighths |Divide by 128       |
+  // | 108   |TwoHundredFiftySixths   |Divide by 256       |
+  // | 109   |FiveHundredTwelths      |Divide by 512       |
+  // | 110   |OneThousandTwentyFourths|Divide by 1024      |
+  // | 201   |HalfThirtySeconds       |Similar to 64ths    |
+  // | 202   |QuarterThirtySeconds    |Similar to 128ths   |
+  // | 203   |EighthThirtySeconds     |Similar to 256ths   |
+  // | 204   |HalfSixtyFourths        |Similar to 128ths   |
+  // | 205   |QuarterSixtyFourths     |Similar to 256ths   |
+  // | 206   |SixteenthThirtySeconds  |Similar to 512ths   |
+  // -------------------------------------------------------
+  required uint32 display_price_scale = 4;
+
+  // [obsolete] This operation is no longer supported.
+  optional uint32 obsolete_discretionary_display_price_scale = 37 [deprecated = true];
+
+  // Contract description.
+  required string description = 5;
+
+  // Use description instead.
+  optional string extended_description = 43 [deprecated = true];
+
+  // Contract display name.
+  required string title = 6;
+
+  // Size or a single market tick in correct price format.
+  required double tick_size = 7;
+
+  // [obsolete] This operation is no longer supported.
+  optional double obsolete_discretionary_tick_size = 36 [deprecated = true];
+
+  // Contract currency code (ISO 4217 based).
+  // Empty string if not applicable (e.g. for indexes).
+  required string currency = 8;
+
+  // Contract tick money value in the contract's currency.
+  // Zero if not applicable (e.g. for indexes).
+  required double tick_value = 9;
+
+  // CFI code (Classification of Financial Instruments, ISO 10962).
+  required string cfi_code = 10;
+
+  // True if this contract is the most active one for derivatives.
+  optional bool is_most_active = 11;
+
+  // Contract trading date for derivatives
+  // (local exchange date in time format, use date part only).
+  optional sint64 last_trading_date = 12;
+
+  // Contract first notice date
+  // (local exchange date in time format, use date part only).
+  optional sint64 first_notice_date = 13;
+
+  // Underlying contract symbol (e.g. for options and equities).
+  optional string underlying_contract_symbol = 14;
+
+  // Margin style (for options).
+  enum MarginStyle
+  {
+    // The premium is paid on exercise/ expiry (position is included to OTE calculation).
+    MARGIN_STYLE_FUTURE = 1;
+
+    // Premium is subtracted from account balance when order is filled (position is included to MVO/UPL calculation).
+    MARGIN_STYLE_PREMIUM = 2;
+  }
+
+  // This field is associated with MarginStyle enum type.
+  optional uint32 margin_style = 15;
+
+  // Name of a group of contracts that share the same properties (e.g. commodity name for futures and options).
+  required string instrument_group_name = 16;
+
+  // ID of a session information this contract is related to.
+  // The field is set to -1 if session information is not available.
+  required sint32 session_info_id = 17;
+
+  // Market segment MIC (ISO 10383) of the contract (if available), e.g. 'GLBX'.
+  optional string mic = 18;
+
+  // Market segment MIC description (ISO 10383) of the contract (if available), e.g. 'CME GLOBEX'.
+  optional string mic_description = 44;
+
+  // If a user has access to delayed data of the contract
+  // then this parameter is set to the delay value in milliseconds.
+  optional sint64 market_data_delay = 20;
+
+  // If user is not allowed to receive quotes then End of Day (EOD) data for this contract can be allowed.
+  // In case of real-time market data subscriptions only level MARKET_VALUES is supported.
+  // In case of time bar requests only Daily (or larger) bars are supported.
+  // Note: Data for current and previous trading days are available only if corresponding trading day
+  // was closed |end_of_day_delay| milliseconds ago.
+  optional sint64 end_of_day_delay = 59;
+
+  // Instrument group name without the prefix.
+  required string short_instrument_group_name = 21;
+
+  // Description of the instrument group.
+  required string instrument_group_description = 22;
+
+  // Variable tick size by contract price (if available for the contract).
+  // If variable tick sizes by contract price are available, tick_size and tick_value specify the minimal tick size
+  // and value among these.
+  // Only one of tick_sizes_by_price and tick_sizes_by_dte can be specified.
+  repeated TickSizeByPrice tick_sizes_by_price = 23;
+
+  // Variable tick size by date till expiration (if available for the contract).  Sorted by id in ascending order.
+  // If variable tick sizes by DTE are available, tick_size and tick_value specify the tick size and value applicable at
+  // the moment of symbol resolution.
+  // Only one of tick_sizes_by_price and tick_sizes_by_dte can be specified.
+  repeated TickSizeByDateTillExpiration tick_sizes_by_dte = 24;
+
+  // Specifies which rule of TickSizeByDateTillExpiration applies now.
+  optional uint32 tick_sizes_by_dte_id = 25;
+
+  // Option strike display value.
+  optional sint32 strike = 26;
+
+  // Option strike price value (directly in correct format).
+  optional double strike_price = 27;
+
+  // Dialect of the contract symbol.
+  // 0 - CQG dialect.
+  optional string dialect_id = 28;
+
+  // Two-letter exchange country code (ISO 3166-1 alpha 2).
+  required string country_code = 29;
+
+  // Strategy definition if the contract is of a synthetic or a user defined strategy.
+  optional strategy_definition_2.StrategyDefinition strategy_definition = 30;
+
+  // The deliverable quantity of commodities or financial instruments underlying contract.
+  // E.g. "1,000 U.S. Barrels (42,000) Gallons", "125,000 Euro"
+  optional string contract_size = 31;
+
+  // Setting which regulates how to calculate contract open positions.
+  // POSITION_TRACKING_TYPE_NET_POSITION, if not set.
+  optional uint32 position_tracking = 32;
+
+  // Setting which requires whether every contract order has to specify SpeculationType instruction or not.
+  optional bool speculation_type_required = 33 [default = false];
+
+  // Month letter and 2-digit year identifying the maturity month of the contract (if applicable).
+  // Doesn't depend on dialect.
+  // Month and corresponding letter:
+  // January   F
+  // February  G
+  // March     H
+  // April     J
+  // May       K
+  // June      M
+  // July      N
+  // August    Q
+  // September U
+  // October   V
+  // November  X
+  // December  Z
+  optional string maturity_month_year = 34;
+
+  // Contract's maturity date (e.g. for daily futures, when maturity_month_year is not enough).
+  // (local exchange date in time format, use date part only).
+  optional sint64 maturity_date = 53;
+
+  // Recommended display mode for prices. See the PriceDisplayMode description.
+  optional PriceDisplayMode price_display_mode = 35;
+
+  // [obsolete] This operation is no longer supported.
+  optional PriceDisplayMode obsolete_discretionary_price_display_mode = 38 [deprecated = true];
+
+  // Currency code (ISO 4217 based). For forex contracts only. Specifies the currency bought or sold.
+  optional string foreign_currency = 39;
+
+  // Specifies a volume unit of a contract, similar to correct_price_scale.
+  // If a message contains a volume as uint64 (like Quote or TimeBar), its correct volume is calculated as:
+  //   correct_volume = Quote.volume * volume_scale.
+  // If a message contains a volume as cqg.Decimal, it is the correct volume.
+  // If a contract has no fixed scale, this value is 1, and only cqg.Decimal volumes must be used.
+  optional cqg.Decimal volume_scale = 40 [deprecated = true];
+
+  // Specifies the recommended representation of volumes to users:
+  //  - negative numbers - -N - mean that N decimal digits should be shown.
+  //  - positive numbers - N - mean that N digits can be hidden behind a unit prefix (or unit symbol),
+  //    e.g. if N = 3, volumes can be shown as "12k".
+  optional sint32 volume_display_exponent = 41 [default = 0];
+
+  // Trade volume is required to be a multiple of trade_size_increment.
+  optional cqg.Decimal trade_size_increment = 42;
+
+  // True if DOM views should be inverted: low numbers are at the top, high numbers are at the bottom.
+  // This field is usually set for fixed income contracts with "prices are yields" model.
+  optional bool has_inverted_price_ladder = 60;
+
+  // The denominator (numerator is 1) of the DOM ladder compression ratio
+  // to compress the ladder to eliminate all the extra/non-quoting values.
+  optional uint32 dom_ladder_compression_ratio = 45;
+
+  // Whether to expect that prices may appear not on the nominal tick prices
+  // (not products of any tick_size: ordinal, variable, etc.) to changes DOM UI behavior.
+  // Format such prices according to display_price_scale rule.
+  optional bool expect_off_tick_prices = 46 [default = false];
+
+  // Specifies whether exchange provides volume data or not.
+  optional bool has_exchange_volume = 47 [default = true];
+
+  // True if the contract supports yields and you can request them with MarketDataSubscription.include_yields.
+  // Note: In case the contract has "prices are yields" model this field is false and yields are provided
+  // through the price field.
+  optional bool has_yields = 61;
+
+  // The ISIN code acts an identifier for the securities.
+  // And as such is the only common denominator securities identification number that is universally recognized.
+  optional string isin = 48;
+
+  // Reference value for maintenance margin (required to maintain 1 lot position
+  // in this contract), expressed as money value in the contract's currency.
+  // Note the value is informational only, not updated real-time, and does not
+  // consider the account's portfolio or risk settings/parameters.
+  optional double maintenance_margin = 49;
+
+  // Contract size in the number of units (where defined). Unit is defined by contract_size_unit filed.
+  optional cqg.Decimal contract_size_in_units = 50;
+
+  // Unit label for the contract size.
+  optional shared_1.Text contract_size_unit = 51;
+
+  // Contract last delivery date
+  // (local exchange date in time format, use date part only).
+  optional sint64 last_delivery_date = 52;
+
+  // Optional custom contract parameters per associated OTC contributor (if any).
+  repeated metadata_admin_2.ContributorParameters contributor_parameters = 54;
+
+  // Period type. This field is associated with PeriodType enum type.
+  optional uint32 period_type = 55;
+
+  // Period value in period_type units.
+  optional uint32 period_value = 56;
+
+  // ID of the symbol the contract represents (Symbol.id attribute).
+  optional string symbol_id = 57;
+
+  // If contract metadata is "deleted", corresponding contract id can't be referred to in requests anymore
+  // (this happens e.g. when published contract gets unpublished).
+  optional bool deleted = 58 [default = false];
+
+  // ID used for ContributorMetadataRequest.
+  optional sint32 contributor_group_id = 62;
+
+  // If this instrument is double-quoted the field contains a contract id
+  // to request corresponding source contract metadata (see ContractMetadataRequest).
+  optional uint32 source_contract_id = 63;
+
+  // Equity issuer.
+  optional string issuer = 66;
+
+  // Option contract's maturity ID.
+  optional string option_maturity_id = 67;
+
+  // Metadata used for real-time and trading data conversion.
+  optional ConversionMetadata conversion_metadata = 68;
+
+  // ID used for MarketStateMetadataRequest.
+  optional sint32 market_state_group_id = 69;
+
+  // Settlement method.
+  // This field is associated with SettlementMethod enum type.
+  optional uint32 settlement_method = 71;
+
+  // Exercise style, for options only.
+  // This field is associated with ExerciseStyle enum type.
+  optional uint32 exercise_style = 72;
+
+  // Pricing convention.
+  // This field is associated with PricingConvention enum type.
+  optional uint32 pricing_convention = 73;
+
+  // True if contract represents user-defined instrument.
+  optional bool is_user_defined_instrument = 74;
+
+  // List of tick types used in bar building.
+  // This field is associated with BarBuildingTickType enum type.
+  // Note: BAR_BUILDING_TICK_TYPE_SETTLEMENT is used only in build time bars.
+  repeated uint32 bar_building_tick_types = 75;
+}
+
+// Request for contributor metadata.
+message ContributorMetadataRequest
+{
+  // Contributor group ID from ContractMetadata.
+  optional sint32 contributor_group_id = 1;
+}
+
+// Report with contributor metadata.
+message ContributorMetadataReport
+{
+  // List of contributor metadata.
+  // Note: ContributorMetadata list may be empty even for valid contributor_group_id.
+  repeated ContributorMetadata contributor_metadata = 1;
+}
+
+// Contributor metadata.
+message ContributorMetadata
+{
+  // ID used in TradeAttributes as buyer and seller.
+  // Unique for its Contributor Group ID.
+  optional sint32 contributor_id = 1;
+
+  // Contributor name.
+  optional string name = 2;
+
+  // Contributor description.
+  optional string description = 3;
+
+  // Contributor is deleted (used for updates).
+  optional bool deleted = 4;
+}
+
+// Request a list of option maturities by an underlying contract
+message OptionMaturityListRequest
+{
+  required uint32 underlying_contract_id = 1;
+}
+
+// Report with a list of option maturities.
+// When the list is updated by a subscription
+// (e.g. some option maturity is expired or a new one appears)
+// the list includes only new or deleted items.
+message OptionMaturityListReport
+{
+  // List of option maturities.
+  repeated OptionMaturityMetadata option_maturities = 1;
+}
+
+// Option maturity metadata.
+// It represents a list of option strikes (puts and calls) with the same underlying instrument and expiration date.
+message OptionMaturityMetadata
+{
+  // Option maturity identifier.
+  required string id = 1;
+
+  // Option maturity name.
+  required string name = 2;
+
+  // Option maturity description.
+  required string description = 3;
+
+  // CFI code (Classification of Financial Instruments, ISO 10962) if appropriate.
+  optional string cfi_code = 4;
+
+  // Deleted flag is used in updates when the option maturity is removed (e.g. expired).
+  optional bool deleted = 7;
+
+  // Last trading date (local exchange date in time format, use date part only).
+  optional sint64 last_trading_date = 8;
+
+  // Month letter and 2-digit year identifying the maturity month.
+  // Note: look at comment for maturity_month_year from ContractMetadata for further info.
+  optional string maturity_month_year = 9;
+
+  // Name of a group of instruments that share the same properties (e.g. commodity name).
+  optional string instrument_group_name = 10;
+
+  // Whether the option maturity instrument group has option strikes.
+  // It relates to InstrumentGroupRequest request.
+  // Some option strikes can be related to option maturity, but they can be absent in the group.
+  // E.g., option strikes range is changed and strikes out of the range don't appear in the group.
+  optional bool instrument_group_empty = 17;
+
+  optional bool reserved1 = 5;
+
+  // reserved 6,11-16;
+}
+
+// Request a group of instruments by an instrument group identifier.
+message InstrumentGroupRequest
+{
+  // Identifier of instrument group. It can be one of:
+  // * Option maturity id to get a group of option strikes (see OptionMaturityMetadata.id)
+  // * Instrument group's name to get a group of futures (e.g. 'F.US.EP', see
+  //   ContractMetadata.instrument_group_name or SecurityMetadata.source_instrument_group_name)
+  required string instrument_group_id = 1;
+}
+
+// Report with a group of instruments.
+message InstrumentGroupReport
+{
+  // Instruments.
+  repeated InstrumentGroupItem instruments = 1;
+}
+
+// Instrument group item.
+message InstrumentGroupItem
+{
+  // Instrument group item identifier.
+  required string id = 1;
+
+  // Instrument name.
+  required string name = 2;
+
+  // Instrument description.
+  required string description = 3;
+
+  // CFI code (Classification of Financial Instruments, ISO 10962) if appropriate.
+  optional string cfi_code = 4;
+
+  // Contract meta-data.
+  optional ContractMetadata contract_metadata = 6;
+
+  // Deleted flag is used in updates when the instrument is removed from the group (e.g. expired).
+  optional bool deleted = 7;
+
+  // Last trading date for derivatives if applicable.
+  // (local exchange date in time format, use date part only).
+  optional sint64 last_trading_date = 8;
+
+  // Month letter and 2-digit year identifying the maturity month of the instrument.
+  // Note: look at comment for maturity_month_year from ContractMetadata for further info.
+  optional string maturity_month_year = 9;
+
+  // Name of a group of instruments that share the same properties (e.g. commodity name for futures and options).
+  optional string instrument_group_name = 10;
+
+  optional bool reserved1 = 5;
+  optional string reserved2 = 11;
+
+  // reserved 12-16;
+}
+
+// Request for Market State metadata.
+message MarketStateMetadataRequest
+{
+  // Market State Group ID from ContractMetadata.
+  required sint32 market_state_group_id = 1;
+}
+
+// Market State metadata.
+// The first complete report contains initial snapshot, which may be saved as local state.
+// All subsequent messages contain updates that may be applied to the local state.
+// Subscribed requests in case of server-side communication issues will receive
+// an InformationReport with status_code "StatusCode.STATUS_CODE_DISCONNECTED".
+// After issues resolution subscribed requests will receive an InformationReport
+// with status_code "StatusCode.STATUS_CODE_SUBSCRIBED" and with a list of metadata updates, if there are any.
+message MarketStateMetadataReport
+{
+  repeated MarketStateAttributeMetadata market_state_attribute_metadata = 1;
+}
+
+// Market State attribute metadata
+// Note: To apply a metadata update one must follow rules:
+//  1. If an update contains a MarketStateAttributeMetadata with a combination of "name" and
+//     "level" fields values, which does not exist in the local state, then it must be added to it.
+//  2. If an update contains a MarketStateAttributeMetadata with a combination of "name" and
+//     "level fields values, which already exists in the local state, then:
+//     i. If the field "deleted" is present and set to true - this Attribute should be deleted from the local state.
+//     ii. Otherwise updates for value_metadata should be applied (see MarketStateValueMetadata comments).
+message MarketStateAttributeMetadata
+{
+  // Attribute name
+  optional string name = 1;
+
+  // Attribute level in attributes hierarchy
+  optional uint32 level = 2;
+
+  // Attribute possible values metadata
+  repeated MarketStateValueMetadata value_metadata = 3;
+
+  // If present and true - attribute should be deleted from metadata
+  optional bool deleted = 4;
+}
+
+// Market State attribute value metadata.
+// Note: To apply a value metadata update one must follow rules:
+//  1. If a received update has MarketStateValueMetadata with the "value" field value, which does not exist
+//     in the local state, then this metadata must be added to it.
+//  2. If a received update has MarketStateValueMetadata with the "value" field value, which exists
+//     in the local state, then:
+//     i. If the field "deleted" present and set to true - this MarketStateValueMetadata should be deleted
+//        from the local state.
+//     ii. If the field "description" value is different from the value stored in the local state - it should be set
+//         to the new value.
+message MarketStateValueMetadata
+{
+  // Attribute value
+  optional string value = 1;
+
+  // Attribute value description
+  optional string description = 2;
+
+  // If present and true - attribute value metadata should be deleted
+  optional bool deleted = 3;
+}
+
+// Request for exchange metadata.
+message ExchangeMetadataRequest
+{
+}
+
+// Report with exchange metadata.
+message ExchangeMetadataReport
+{
+  // Requested exchange metadata.
+  repeated ExchangeMetadata exchange_metadata = 1;
+}
+
+// Exchange metadata.
+message ExchangeMetadata
+{
+  // Contributor type.
+  enum ContributorType
+  {
+    CONTRIBUTOR_TYPE_UNDEFINED = 0;
+
+    // Contributor is a quote source.
+    CONTRIBUTOR_TYPE_US_EQUITY_STYLE = 1;
+
+    // Contributor is a buyer.
+    CONTRIBUTOR_TYPE_OTC_STYLE = 2;
+
+    // Contributor is a seller.
+    CONTRIBUTOR_TYPE_CLUSTER_STYLE = 3;
+  }
+
+  // Exchange ID.
+  // It is required field.
+  optional sint32 exchange_id = 1;
+
+  // This field is associated with ContributorType enum type.
+  optional uint32 contributor_type = 2;
+
+  // Exchange abbreviation.
+  optional string abbreviation = 3;
+
+  // Exchange name.
+  optional string name = 4;
+
+  // Description.
+  optional string description = 5;
+
+  // If present and true - exchange metadata should be deleted.
+  optional bool deleted = 6;
+}

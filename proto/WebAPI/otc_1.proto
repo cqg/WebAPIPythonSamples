@@ -1,0 +1,618 @@
+// OTC messages
+// Times are in google.protobuf.Timestamp since Unix Epoch on January 1st, 1970
+// Each change in this protocol increases webapi_1.proto version.
+
+syntax = "proto2";
+
+package otc_1;
+
+import "common/shared_1.proto";
+import "common/decimal.proto";
+import "google/protobuf/timestamp.proto";
+
+////------------------------------------------
+//// Client to OTC/WebAPI messages
+
+// Client messages.
+message OtcRequest
+{
+  // Request identifier.
+  optional string request_id = 1;
+
+  // OTC instances subscription.
+  // Number of simultaneous requests with subscription for updates is limited,
+  // 1 by default.
+  optional OtcInstancesSubscription otc_instances_subscription = 2;
+
+  // Hedge books subscription.
+  // Number of simultaneous requests with subscription for updates is limited,
+  // 1 per OTC instance by default.
+  optional HedgeBooksSubscription hedge_books_subscription = 3;
+
+  // Hedge book details subscription.
+  // Request rate is limited, 1000 requests per 100 seconds by default.
+  // Number of simultaneous requests in processing is limited, 100 by default.
+  // Number of simultaneous requests with subscription for updates is limited,
+  // 1000 by default.
+  optional HedgeBookDetailsSubscription hedge_book_details_subscription = 4;
+
+  // Offset hedge balance request.
+  // Request rate is limited, 100 requests per 100 seconds by default.
+  optional OffsetHedgeBalanceRequest offset_hedge_balance_request = 5;
+
+  // Change OTC state request.
+  // Request rate is limited, 10 requests per 100 seconds by default.
+  optional ChangeOtcStateRequest change_otc_state_request = 6;
+
+  // Fill cash order request.
+  // Request rate is limited, 1000 requests per 100 seconds by default.
+  optional FillCashOrderRequest fill_cash_order_request = 7;
+
+  // Archive hedge balance details request.
+  optional ArchiveHedgeBalanceDetailsRequest archive_hedge_balance_details_request = 8;
+
+  // Request balance item links for specific item.
+  // Request rate is limited, 100 requests per 100 seconds by default.
+  optional BalanceItemsLinksRequest balance_items_links_request = 9;
+}
+
+// OTC/WebAPI responses.
+message OtcReport
+{
+  enum StatusCode
+  {
+    /// success codes (0 - 100)
+    STATUS_CODE_SUCCESS = 0;
+
+    // Request is processed and subscription is established.
+    STATUS_CODE_SUBSCRIBED = 1;
+
+    // Subscription is dropped by a client request.
+    STATUS_CODE_DROPPED = 2;
+
+    // Unsolicited information update because of subscription.
+    STATUS_CODE_UPDATE = 3;
+
+    // Currently subscription is disconnected because of communication issues.
+    // NOTE: Clients should not resubscribe in this case, the server will
+    // restore subscription with sending STATUS_CODE_SUBSCRIBED status once
+    // communication issues are resolved.
+    STATUS_CODE_DISCONNECTED = 4;
+
+    //// failure codes (100+)
+    // General failure.
+    STATUS_CODE_FAILURE = 101;
+
+    // Subscription parameters are invalid.
+    STATUS_CODE_INVALID_PARAMS = 102;
+
+    // The user is not allowed to perform the request.
+    STATUS_CODE_ACCESS_DENIED = 103;
+
+    // The subscription count limit has been violated.
+    STATUS_CODE_SUBSCRIPTION_LIMIT_VIOLATION = 104;
+
+    // The subscription rate limit has been violated.
+    STATUS_CODE_SUBSCRIPTION_RATE_LIMIT_VIOLATION = 105;
+
+    // Object not found.
+    STATUS_CODE_NOT_FOUND = 106;
+
+    // Request is timed out.
+    STATUS_CODE_TIMEOUT = 107;
+  }
+
+  // ID of a corresponding request or subscription.
+  optional string request_id = 1;
+
+  // Operation status.
+  // This field is associated with StatusCode enum.
+  optional uint32 status_code = 2;
+
+  // Operation details.
+  optional shared_1.Text details = 3;
+
+  // OTC instances report.
+  optional OtcInstancesReport otc_instances_report = 4;
+
+  // Hedge books report.
+  optional HedgeBooksReport hedge_books_report = 5;
+
+  // Hedge book details report.
+  optional HedgeBookDetailsReport hedge_book_details_report = 6;
+
+  // Offset hedge balance result.
+  optional OffsetHedgeBalanceResult offset_hedge_balance_result = 7;
+
+  // Change OTC state result.
+  optional ChangeOtcStateResult change_otc_state_result = 8;
+
+  // Fill cash order result.
+  optional FillCashOrderResult fill_cash_order_result = 9;
+
+  // Archive hedge balance details result.
+  optional ArchiveHedgeBalanceDetailsResult archive_hedge_balance_details_result = 10;
+
+  // Balance item links for requested item.
+  optional BalanceItemsLinksResult balance_items_links_result = 11;
+}
+
+////------------------------------------------
+//// Entities
+
+enum InstanceState
+{
+  // Instance is online and processes orders.
+  INSTANCE_STATE_ONLINE = 0;
+
+  // Instance is offline. Used only in status response. OTC may not be put
+  // offline by client request.
+  INSTANCE_STATE_OFFLINE = 1;
+
+  // Instance is suspended by ChangeOtcStateRequest.
+  INSTANCE_STATE_SUSPENDED = 2;
+}
+
+// Hedge balance key.
+message HedgeBalanceKey
+{
+  // Hedge Account ID in CQG trade routing system.
+  optional sint32 account_id = 1;
+
+  // Server side contract id.
+  optional uint32 contract_id = 2;
+
+  // Reserved for internal use.
+  extensions 100 to 199;
+}
+
+// OTC instances subscription.
+message OtcInstancesSubscription
+{
+  // If set to true - subscribe to changes, if false - drop subscription.
+  optional bool subscribe = 1 [default = true];
+}
+
+// OTC instances report.
+message OtcInstancesReport
+{
+  repeated OtcInstanceState otc_instance_states = 1;
+}
+
+// OTC instance state.
+message OtcInstanceState
+{
+  // OTC instance ID.
+  optional uint32 instance_id = 1;
+
+  // OTC instance name.
+  optional string name = 2;
+
+  // OTC instance state.
+  // This field is associated with InstanceState enum type.
+  optional uint32 state = 3;
+}
+
+// Hedge books subscription.
+message HedgeBooksSubscription
+{
+  // If set to true - subscribe to changes, if false - drop subscription.
+  optional bool subscribe = 1 [default = true];
+
+  // OTC instance id.
+  optional uint32 otc_instance_id = 2;
+}
+
+// Hedge books report.
+message HedgeBooksReport
+{
+  // True if this is a snapshot (all previously known data about this hedge
+  // book should be cleaned).
+  // All updates will be postponed until full snapshot is sent.
+  // False used for incremental updates.
+  // Snapshot will be sent only once after subscription. May be sent in multiple
+  // parts. Each part will have this field set to true. False by default.
+  optional bool is_snapshot = 1;
+
+  // If true - then this message mean last part of multi-parted snapshot.
+  optional bool is_last_part = 2;
+
+  // Hedge balance details.
+  repeated HedgeBalanceDetails hedge_balance_details = 3;
+
+  // List of archived hedge balance details.
+  repeated ArchivedHedgeBalanceDetails archived_hedge_balance_details = 4;
+}
+
+message HedgeBalanceDetails
+{
+  // Hedge balance key.
+  optional HedgeBalanceKey hedge_balance_key = 1;
+
+  // Deleted flag is used in updates when entity is removed.
+  // Only hedge_balance_key will be provided in this case.
+  optional bool deleted = 2;
+
+  // Current hedge balance in units. If missing - hedge balance is not changed
+  // since last update.
+  optional cqg.Decimal hedge_balance = 3;
+
+  // Pending balance in units. Means non-filled hedge orders size in units.
+  // If missing - pending balance is not changed since last update.
+  optional cqg.Decimal pending_balance = 4;
+
+  // Full contract symbol.
+  optional string contract_symbol = 5;
+
+  // Name of units for balance values in this message
+  optional shared_1.Text units_name = 6;
+}
+
+// Hedge book details subscription.
+message HedgeBookDetailsSubscription
+{
+  // If set to true - subscribe to changes, if false - drop subscription.
+  optional bool subscribe = 1 [default = true];
+
+  // OTC instance id.
+  optional uint32 otc_instance_id = 2;
+
+  // Hedge balance key.
+  optional HedgeBalanceKey hedge_balance_key = 3;
+
+  // Start point for the history request, inclusive.
+  // Maximum allowed history is returned if omitted.
+  optional google.protobuf.Timestamp from_utc_timestamp = 4;
+
+  // Unique identifier of archived hedge balance and its details; generated by OTC.
+  // Should be used for grouping archived hedge balance details and archived hedge book details.
+  optional string archive_id = 5;
+}
+
+// Hedge book details report.
+message HedgeBookDetailsReport
+{
+  // True if this is a snapshot (all previously known data about this hedge book
+  // should be cleaned).
+  // False used for incremental updates.
+  // Snapshot will be sent only once after subscription. May be sent in multiple
+  // parts. Each part will have this field set to true. False by default.
+  optional bool is_snapshot = 1;
+
+  // If true - then this message mean last part of multi-parted snapshot.
+  optional bool is_last_part = 2;
+
+  // List of cash orders.
+  // Deprecated. Use balance_items instead.
+  repeated CashOrderDetails cash_order_details = 3 [deprecated = true];
+
+  // List of hedge orders.
+  // Deprecated. Use balance_items instead.
+  repeated HedgeOrderDetails hedge_order_details = 4 [deprecated = true];
+
+  // List of links between cash and hedge orders.
+  // Only one link between particular cash and hedge orders may exist.
+  // Deprecated. Use items_links instead.
+  repeated CashToHedgeOrdersLink cash_to_hedge_orders_links = 5 [deprecated = true];
+
+  // List of balance items: Cash, Hedge and BalanceOffset
+  repeated BalanceItem balance_items = 6;
+
+  // List of links between any type of BalanceItem.
+  repeated BalanceItemsLink items_links = 7;
+}
+
+// Cash order details.
+// [deprecated] use BalanceItem instead.
+message CashOrderDetails
+{
+  // Order ID assigned by server to originally placed order.
+  optional string chain_order_id = 1;
+
+  // Deleted flag is used in updates when entity is removed.
+  // Only chain_order_id will be provided in this case.
+  optional bool deleted = 2;
+
+  // Account ID in CQG trade routing system.
+  optional sint32 account_id = 3;
+
+  // Server side contract id.
+  optional uint32 contract_id = 4;
+
+  // Time when order added to hedge balance.
+  optional google.protobuf.Timestamp hedge_utc_timestamp = 5;
+
+  // Total order size in units.
+  optional cqg.Decimal units = 6;
+
+  // Name of units for order size value in this message.
+  optional shared_1.Text units_name = 7;
+
+  // Reserved for internal use.
+  extensions 100 to 199;
+}
+
+// Hedge order details.
+// [deprecated] use BalanceItem instead.
+message HedgeOrderDetails
+{
+  // Order ID assigned by server to originally placed order.
+  optional string chain_order_id = 1;
+
+  // Deleted flag is used in updates when entity is removed.
+  // Only chain_order_id will be provided in this case.
+  optional bool deleted = 2;
+
+  // Time when hedge order placed.
+  optional google.protobuf.Timestamp hedge_utc_timestamp = 3;
+
+  // Total order size in units.
+  optional cqg.Decimal units = 4;
+
+  // Quantity open for further execution in units.
+  optional cqg.Decimal open_units = 5;
+
+  // Name of units for order size values in this message
+  optional shared_1.Text units_name = 6;
+}
+
+// Cash to hedge orders link.
+// [deprecated] use BalanceItemsLink instead.
+message CashToHedgeOrdersLink
+{
+  // Deleted flag is used in updates when entity is removed.
+  // Only link_id will be provided in this case.
+  optional bool deleted = 1;
+
+  // Time when link created.
+  optional google.protobuf.Timestamp link_utc_timestamp = 2;
+
+  // Cash order ID.
+  optional string cash_order_id = 3;
+
+  // Hedge Order ID.
+  optional string hedge_order_id = 4;
+
+  // Hedge size covered by this link in units.
+  optional cqg.Decimal link_units = 5;
+
+  // Name of units for hedge size values in this message
+  optional shared_1.Text units_name = 6;
+}
+
+// Key that uniquely identifies each BalanceItem.
+message BalanceItemKey
+{
+  enum ItemType
+  {
+    CASH_ORDER     = 1;
+    HEDGE_ORDER    = 2;
+    BALANCE_OFFSET = 3;
+  }
+
+  // For CASH_ORDER and HEDGE_ORDER - Order ID assigned by server to originally placed order.
+  // For BALANCE_OFFSET - Offset ID assigned by OTC.
+  optional string item_id = 1;
+
+  // This field is associated with ItemType enum.
+  optional uint32 item_type = 2;
+}
+
+// Balance item details.
+message BalanceItem
+{
+  // Unique identifier for each BalanceItem
+  optional BalanceItemKey item_key = 1;
+
+  // Deleted flag is used in updates when entity is removed.
+  // Only chain_order_id will be provided in this case.
+  optional bool deleted = 2;
+
+  // Time when order placed or balance offset initiated.
+  optional google.protobuf.Timestamp utc_timestamp = 3;
+
+  // Total order size in units.
+  optional cqg.Decimal units = 4;
+
+  // Quantity open for further execution in units.
+  optional cqg.Decimal open_units = 5;
+
+  // Name of units for order size values in this message
+  optional shared_1.Text units_name = 6;
+
+  // Trader name initiated balance offset.
+  // Used for BALANCE_OFFSET and if specified in OffsetHedgeBalanceRequest.
+  optional string username = 7;
+
+  // User comment with information related to balance offset.
+  // Used for BALANCE_OFFSET and if specified in OffsetHedgeBalanceRequest.
+  optional string comment = 8;
+
+  // Server side contract id.
+  optional uint32 contract_id = 9;
+
+  // Reserved for internal use.
+  extensions 100 to 199;
+}
+
+// Balance items link details.
+message BalanceItemsLink
+{
+  // Deleted flag is used in updates when entity is removed.
+  // Only first_item_key and second_item_key will be provided in this case.
+  optional bool deleted = 1;
+
+  // Time when link created.
+  optional google.protobuf.Timestamp link_utc_timestamp = 2;
+
+  // Unique identifier for first BalanceItem.
+  optional BalanceItemKey first_item_key = 3;
+
+  // Unique identifier for second BalanceItem.
+  optional BalanceItemKey second_item_key = 4;
+
+  // Link size in units of first item
+  optional cqg.Decimal size_in_first_item_units = 5;
+
+  // Units for size_in_first_item_units value (eg: 'Bushels', 'Tonnes', 'CAD', ...)
+  optional shared_1.Text first_item_units = 6;
+
+  // Link size from in units of the second item
+  optional cqg.Decimal size_in_second_item_units = 7;
+
+  // Units for size_in_second_item_units value (eg: 'Bushels', 'Tonnes', 'CAD', ...)
+  optional shared_1.Text second_item_units = 8;
+}
+
+// Offset hedge balance request.
+message OffsetHedgeBalanceRequest
+{
+  // OTC instance id.
+  optional uint32 otc_instance_id = 1;
+
+  // Hedge balance key.
+  optional HedgeBalanceKey hedge_balance_key = 2;
+
+  // Hedge balance offset.
+  optional cqg.Decimal hedge_balance_offset = 3;
+
+  // Trader name initiated balance offset.
+  optional string username = 4;
+
+  // User comment.
+  optional string comment = 5;
+
+  // offset balance to 0.
+  optional bool zero_balance = 6;
+}
+
+// Offset hedge balance result.
+message OffsetHedgeBalanceResult
+{
+}
+
+// Change OTC state request.
+// Shall provide OTC instance ID.
+message ChangeOtcStateRequest
+{
+  enum Action
+  {
+    // Activate previously suspended OTC instance.
+    ACTION_ACTIVATE = 0;
+
+    // Suspend active OTC instance.
+    // OTC will reject all client orders and will not send hedge orders to
+    // exchange.
+    ACTION_SUSPEND = 1;
+  }
+
+  // OTC instance id.
+  optional uint32 otc_instance_id = 1;
+
+  // New OTC instance state.
+  // This field is associated with Action enum type.
+  optional uint32 action = 2;
+}
+
+// Change OTC state result.
+message ChangeOtcStateResult
+{
+}
+
+// Fill cash order request.
+message FillCashOrderRequest
+{
+  // OTC instance id.
+  optional uint32 otc_instance_id = 1;
+
+  // Order ID assigned by server to originally placed order.
+  // See order_2.OrderStatus.chain_order_id.
+  optional string chain_order_id = 2;
+
+  // Account ID in CQG trade routing system associated with the order.
+  optional sint32 account_id = 3;
+
+  // Server side contract id of the contract for the order.
+  optional uint32 contract_id = 4;
+
+  // Optional fill quantity in lots. Set this field only for partial fills.
+  // Order will be fully filled if this field is not set.
+  optional cqg.Decimal qty = 5;
+
+  // Fill price. May be omitted to fill limit order at order's price.
+  optional sint64 scaled_fill_price = 6;
+
+  // OTC contributor id involved into the order fill processing.
+  optional string contributor_id = 7;
+
+  // Reserved for internal use.
+  extensions 100 to 199;
+}
+
+// Fill cash order result.
+message FillCashOrderResult
+{
+}
+
+// Archive hedge balance details request.
+message ArchiveHedgeBalanceDetailsRequest
+{
+  // Hedge balance key.
+  optional HedgeBalanceKey hedge_balance_key = 1;
+
+  // OTC instance id.
+  optional uint32 otc_instance_id = 2;
+}
+
+// Archive hedge balance details response.
+message ArchiveHedgeBalanceDetailsResult
+{
+}
+
+// Hedge balance details, marked as archived.
+message ArchivedHedgeBalanceDetails
+{
+  // Deleted flag is used in updates when entity is removed.
+  // Only archive_id will be provided in this case.
+  optional bool deleted = 1;
+
+  // Unique identifier of archived hedge balance and its details; generated by OTC.
+  // Should be used for grouping archived hedge balance details and archived hedge book details.
+  optional string archive_id = 2;
+
+  // Archived hedge balance details.
+  optional HedgeBalanceDetails hedge_balance_details = 3;
+
+  // The time when hedge balance and its details were archived.
+  optional google.protobuf.Timestamp archive_utc_timestamp = 4;
+}
+
+// Request balance item links for specific item.
+message BalanceItemsLinksRequest
+{
+  // OTC instance id.
+  optional uint32 otc_instance_id = 1;
+
+  // For CASH_ORDER and HEDGE_ORDER - Order ID assigned by server to originally placed order.
+  // For BALANCE_OFFSET - Offset ID assigned by OTC.
+  optional string item_id = 2;
+
+  // Order Account ID in CQG trade routing system.
+  optional sint32 account_id = 3;
+
+  // Server side item contract id.
+  optional uint32 contract_id = 4;
+
+  // Reserved for internal use.
+  extensions 100 to 199;
+}
+
+// Balance item links for requested item.
+message BalanceItemsLinksResult
+{
+  // All balance items for provided links.
+  repeated BalanceItem balance_items = 1;
+
+  // Links for requested item.
+  repeated BalanceItemsLink items_links = 2;
+}

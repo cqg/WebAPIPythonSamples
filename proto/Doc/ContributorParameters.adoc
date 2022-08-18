@@ -1,0 +1,341 @@
+Contributor parameters
+======================
+Vitaliy Aksyonov <vitaliya@cqg.com>, Vyacheslav Molchkov <slavam@cqg.com>
+v2.2, April 2022
+:toc:
+
+This document describes contributor parameters used by different CQG systems.
+
+Data types
+----------
+Contributor parameters provided as string name-value pairs, but they obviously have types. This section describes used
+types.
+
+.Types
+[options="header"]
+|===
+| Type | Description |Samples
+//---------------------------
+| Integer | 32 bits integer numbers. | 123, -20
+| Integer enum | Integer numbers which refers to enumeration. Enumeration values described in each particular case. | 123, -20
+| Decimal | Fixed point decimal numbers. 64 bits doubles range. | 0.25, -34.1
+| String | ASCII strings. | Some value
+| Boolean | Boolean values. Valid strings are "true" and "false". Case-sensitive. | true, false
+| UTCDateTime | UTC date and time in ISO 8601 notation (YYYY-MM-DDThh:mm:ss.ffff). | 2019-11-24T14:45:12.123456
+|===
+
+Parameters description
+----------------------
+Contributor parameters may be set on Prefix/Security level, Contract level or both levels. Following sections describe
+those parameters.
+
+Prefix/Security Level Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DefaultSide
+^^^^^^^^^^^
+*Type:* Integer enum.
+
+[horizontal]
+0:: Bid
+1:: Offer
+2:: Both
+
+*Default:* Bid.
+
+This is used by CQG Desktop to specify which side to use as default in the UI drop down list for contracts of this
+security.
+
+HedgeExecInstructions
+^^^^^^^^^^^^^^^^^^^^^
+*Type:* Integer.
+
+An bitmask of execution instruction for hedge orders. It is used by OTC engine. Only one bit shall be set.
+"NONE" means that no specific execution instructions are set.
+
+Bits description. From lowest bit. 1-based.
+[horizontal]
+2:: ICBRG
+5:: NONE
+
+HostingAccount
+^^^^^^^^^^^^^^
+*Type:* String.
+
+The account to place the hedging order to. Hedge order GW account (GW Account ID, Account Name or FCM Account Number
+depending on Private Label configuration) If this doesn't exist OTC uses the account configured for the entire OTC.
+
+IcebergVisibleQtyPercent
+^^^^^^^^^^^^^^^^^^^^^^^^
+*Type:* Integer.
+
+An optional visible quantity percentage for a hedge order. It is used by OTC Engine. Valid value range: 0 - 100.
+
+PricingType
+^^^^^^^^^^^
+*Type:* Integer enum.
+
+[horizontal]
+0:: Cash
+1:: Flat
+2:: Basis
+3:: Hedge To Arrive
+
+*Default:* Cash.
+
+Contract pricing type. *Cash:* orders placed by clients will be covered by OTC using configured offset parameters(PriceTickOffset or AskTickOffset or BidTickOffset).
+*Flat Price:* orders placed by clients will be matched against "Price" parameter. *Basis:* orders placed by clients
+will be matched against "NetBasis" parameter. *Hedge To Arrive:* orders placed by clients will be covered by OTC using
+zero offset.
+
+Contracts with *Cash* and *Hedge To Arrive* pricing types shall have source contract. Contracts with *Flat* and
+*Basis* pricing types are created without source contract.
+
+QuoteTypeList
+^^^^^^^^^^^^^
+*Type:* String.
+
+This is an optional comma separated list of quote type to be provided.
+The type names: TRADE, SETTLEMENT, BESTBID, BESTASK, BID, ASK (the last two for DOM levels).
+If the parameter is not set then no additional actions for this quote filtering. 
+
+PricingFallBack
+^^^^^^^^^^^^^^^
+*Type:* Integer enum.
+
+[horizontal]
+0:: None
+1:: FallToLastTrade
+
+*Default:* 0.
+
+Use This is the following algorithm if set to "FallToLastTrade":
+
+- Use Best Bid(Offer) when market is open and it is available
+- Use Last Trade, settlement, or yesterday settlement(first available is taken) if market is open (was open this trading
+date) but Best Bid(Offer) is not available
+- Use Settlement when the market is Closed, if not available - last trade (for today), if not available - yesterday
+settlement.
+
+SpinPriceIncrement
+^^^^^^^^^^^^^^^^^^
+*Type:* Decimal.
+
+*Default:* 0.01.
+
+Used by CQG Desktop to use as a step in Spin Number Edit for securities with pricing type of Basis and Cash. 
+The spin price increment *must* be a multiple of ticksize.
+
+Values range: (int32_min ; int32_max) exclusive.
+
+.Offset pricing
+========================================================================================================================
+SpinPriceIncrement = 0.01 (one cent), TickSize = 0.0025 (quarter of a cent). Up and down arrows changes the value to the
+closest up or down cent so if the value now is 0.2025 then Up click changes it to 0.21 and Down click changes it
+to 0.20. It should be possible to directly enter any value which is a fraction of 0.0025 like 0.3075.
+========================================================================================================================
+
+.Flat / Net Basis pricing
+========================================================================================================================
+SpinPriceIncrement = 0.01 (one cent). Assume TickSize is 0.01 and apply the algorithm above.
+========================================================================================================================
+
+TradableQuotesOnly
+^^^^^^^^^^^^^^^^^^
+*Type:* Boolean.
+
+*Default:* false.
+
+- false - no filtering by session state
+- true - filter out pre-open and post-close BBA quotes
+
+OnBehalfOfSubID
+^^^^^^^^^^^^^^
+*Type:* String.
+
+The CQG trader username to use as the operator ID when placing requests on hedge first orders.
+
+Contract Level Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Basis
+^^^^^
+*Type:* Decimal.
+
+*Default:* 0.
+
+Basis value "basis" from input in "correct" format (price in contract currency).
+
+ClientSymbolID
+^^^^^^^^^^^^^^
+*Type:* String.
+
+Client side identifier of the record to restore a link after lost connection to the server during publishing operation.
+
+ClientGroupID
+^^^^^^^^^^^^^
+*Type:* String.
+
+Client side identifier used to group several contracts together.
+
+CreatedTime
+^^^^^^^^^^^
+*Type:* UTCDateTime.
+
+Time when the contract was created
+
+LastUpdateTime
+^^^^^^^^^^^^^^
+*Type:* UTCDateTime.
+
+Date and time of the last update.
+
+LastUpdateUser
+^^^^^^^^^^^^^^
+*Type:* String.
+
+Username of the person who made the last update.
+
+NetBasis
+^^^^^^^^
+*Type:* Decimal.
+
+Current contract price for Basis pricing style contracts in "correct" format.
+
+(Value / security tick size) in (int32_min ; int32_max) range exclusive.
+
+NotifyClients
+^^^^^^^^^^^^^
+*Type:* Boolean.
+
+*Default:* false.
+
+Indicates if clients of external systems should be notified about contract parameters changes, can be used by API customers as they see fit.
+
+Price
+^^^^^
+*Type:* Decimal.
+
+Contract price for Flat pricing types. Price is set in "correct" format.
+
+(Value / security tick size) in (int32_min ; int32_max) range exclusive.
+
+SequenceNumber
+^^^^^^^^^^^^^^
+*Type:* Integer.
+
+Just an arbitrary value assigned by a client for ordering reasons.
+
+Side
+^^^^
+*Type:* Integer enum.
+
+[horizontal]
+0:: Bid
+1:: Offer
+2:: Both
+
+*Default:* Both.
+
+Contract side. For one side (Bid, Offer) contract some data and actions are restricted. E.g. for Offer contract, bid
+quotes are not provided, and only buy orders are possible.
+
+NotifyNow
+^^^^^^^^^
+*Type:* UTCDateTime.
+
+Set by CQG Desktop to specify time for notification enabled by *NotifyClients* parameter.
+During publish CQG Desktop always either fills this parameter with current UTC date-time or removes the parameter.
+
+Both Level Parameters
+~~~~~~~~~~~~~~~~~~~~~
+
+PriceTickOffset
+^^^^^^^^^^^^^^^
+*Type:* Integer.
+
+*Default:* 0.
+
+The offset/basis for both ask and bid price in ticks of the source contract. Used for cash pricing type. Positive value means "worse" price. Worse from the point of view of a trader wanting to buy/sell the contract.
+A worse price on a bid is a lower price, while a worse price on an offer is a higher price.
+
+AskPriceTickOffset
+^^^^^^^^^^^^^^^^^^
+*Type:* Integer.
+
+Ask basis offset override. Set in number of ticks of the source contract. PriceTickOffset is used if omitted.
+
+BidPriceTickOffset
+^^^^^^^^^^^^^^^^^^
+*Type:* Integer.
+
+Bid basis offset override. Set in number of ticks of the source contract. PriceTickOffset is used if omitted.
+
+Disabled
+^^^^^^^^
+*Type:* Boolean.
+
+*Default:* false.
+
+Flag to disable this product for trading.
+
+HedgeFirst
+^^^^^^^^^^
+*Type:* Boolean
+
+An override to specify if OTC shall try to use "Hedge first" algorithm if order size in units is equal to or greater than the source contract size. If this is not set, OTC will use the value in its configuration.
+
+[horizontal]
+true:: OTC will place hedge orders to the source contract if the quantity is large enough, and wait for a fill on the hedge/source contract before filling the cash contract.
+false:: OTC will only fill incoming cash orders based on offset source market data.
+
+HedgeFirstThreshold
+^^^^^^^^^^^^^^^^^^^
+*Type:* Decimal
+
+*Default:* 1
+
+If HedgeFirst enabled place hedge order if cash order size converted to source units is more than source contract size multiplied by this fraction.
+
+HedgeFirstLocked
+^^^^^^^^^^^^^^^^
+*Type:* Boolean
+
+If set to true CQG Desktop will prohibit editing `HedgeFirst` in UI.
+
+UnitConversionFactor
+^^^^^^^^^^^^^^^^^^^^
+When the duplicate quoted commodity has a different unit than the source, this value defines how many source units in 1 destination unit. For example, a destination soybean commodity is defined with contract size of 1 metric ton, while the source contract size is 1 bushel (both are quoted in cents/unit, i.e. no currency conversion) In practice, this UnitConversionFactor = 36.7437 bushels/ton.  To convert a source price quote to destination price: 125.25 cents/bushel x 36.7437 bushels/ton = 4602.148425 cents/ton. This will be rounded to the nearest tick size, i.e. 0.25 cents, or 4602.25.
+
+When units match, a value of 1 is assumed and this doesn't need to be filled. If they don't match and there is no standard conversion, the destination commodity is not usable. Standard conversions, i.e. grams to kilograms, pounds to ounces, etc. In any case, if the units are different, it can be better to include this parameter in the commodity config.
+
+See https://grains.org/markets-tools-data/tools/converting-grain-units/ for common grain conversions. 
+
+*Type:* Decimal
+
+*Default:* None
+
+FFAlwaysFill
+^^^^^^^^^^^^
+*Type:* Boolean
+
+*Default:* false.
+
+Allows to change OTC fill algorithm for "Fill first" orders.
+
+[horizontal]
+true:: OTC may fill "Fill first" orders regardless source contract session state if market price is available.
+false:: OTC will only fill "Fill first" orders when source contract session is open.
+
+Visibility
+^^^^^^^^^^
+*Type:* Integer enum
+
+*Default:* 0.
+
+An override to specify visibility restrictions for contracts.
+
+[horizontal]
+0:: All - no visibility restrictions
+1:: Publishers - visible only to users who have publish permission to the location the bid is in. Applies to "View bids/offers", "Publish bids/offers" and "Basis Trade" widgets. 
+2:: CQG - visible in CQG only. External clients of the WebAPI should filter them out based on this setting.

@@ -1,0 +1,686 @@
+// Strategy related messages
+
+syntax = "proto2";
+
+package strategy_2;
+
+import "WebAPI/metadata_2.proto";
+import "WebAPI/strategy_definition_2.proto";
+import "common/decimal.proto";
+import "google/protobuf/timestamp.proto";
+
+// Request for algo strategies definitions.
+message AlgoStrategyDefinitionRequest
+{
+  // List of algo strategies to request definitions (abbreviations).
+  repeated string algo_strategies = 1;
+}
+
+// Report with algo strategies definitions.
+message AlgoStrategyDefinitionReport
+{
+  // List of algo strategy definitions for given abbreviations.
+  repeated strategy_definition_2.AlgoStrategyDefinition algo_strategy_definitions = 1;
+}
+
+// Request to define a strategy as a contract.
+message StrategyDefinitionRequest
+{
+  // Strategy to define.
+  required strategy_definition_2.StrategyDefinition strategy_definition = 1;
+
+  // Account ID in CQG trade routing system.
+  // Some exchanges require an account ID in the process of defining a UDS. For those exchanges this is a
+  // required field.
+  optional sint32 account_id = 2;
+}
+
+// Report of the contract metadata assigned to the strategy.
+message StrategyDefinitionReport
+{
+  // Assigned strategy metadata.
+  // Note: In case of exchange strategies field 'strategy_definition' in contract_metadata always matches the definition
+  // received from the exchange, therefore it can be slightly different than field 'strategy_definition' in
+  // StrategyDefinitionRequest.
+  // Example: user wants to define UDS(A + B - C), but similar UDS(A - C + B) already exists on exchange.
+  required metadata_2.ContractMetadata contract_metadata = 1;
+}
+
+// Describes a leg order fill that contributes to a synthetic strategy order fill.
+message StrategyLegFill
+{
+  // Order id for the leg order (the original OrderStatus.order_id)
+  required string leg_order_id = 1;
+
+  // Leg_execution_id of the corresponding Trade message for the leg order fill.
+  required string leg_execution_id = 2;
+
+  // Quantity of the leg order fill used for this synthetic strategy order fill,
+  // decimal (fractional quantities are possible for legs with non-integer quantity ratio).
+  // This is correct quantity (ContractMetadata.volume_scale must not be applied).
+  required double qty = 3;
+}
+
+// Details of hung quantity on a synthetic strategy order or existing hang resolution.
+message SyntheticHang
+{
+  // Unique hang identifier supplied by server.
+  required sint32 hang_id  = 1;
+
+  // Note: use hung_qty field instead.
+  optional uint32 uint32_hung_qty  = 2 [deprecated = true];
+
+  // Quantity (of the synthetic strategy order) hung, 0 indicates that hang is resolved.
+  optional cqg.Decimal hung_qty = 4;
+
+  // Orders participating in a synthetic strategy order hang.
+  // Note: this is the original OrderStatus.order_id.
+  repeated string order_ids = 3;
+}
+
+// Synthetic strategy order's outright properties.
+message SyntheticStrategyProperties
+{
+  // Synthetic strategy trading parameters.
+  optional StrategyTradingParameters strategy_trading_parameters = 1;
+
+  // Parent synthetic order id that led to this order's (automatic) placement;
+  // allows client to show the link to user.
+  // Note: this is the original synthetic order's ID (OrderStatus.order_id), not affected by any modifications.
+  optional string origin_order_id = 2;
+
+  // Id of the originally placed by trader root synthetic strategy order
+  // (The same as origin_order_id for the root immediate legs).
+  optional string root_order_id = 3;
+
+  // Node index of the synthetic order (specified by root_order_id);
+  // allows client to associate this order with a particular node of the synthetic strategy
+  // (either a leg or a nested strategy).
+  // LegDefinition.node_index or StrategyDefinition.node_index value.
+  optional uint32 node_index = 4;
+}
+
+// Defines how a placed synthetic strategy order will be executed.
+message StrategyTradingParameters
+{
+  // Parameters applied only to a MKT order.
+  repeated StrategyMarketOrderParameters market_order_parameters = 1;
+
+  // Parameters applied only to a LMT order.
+  repeated StrategyLimitOrderParameters limit_order_parameters = 2;
+
+  // Parameters applied only to a STP order.
+  repeated StrategyStopOrderParameters stop_order_parameters = 3;
+
+  // Parameters applied only to an aggregation strategy.
+  repeated StrategyAggregationParameters aggregation_parameters = 4;
+
+  // Individual strategy leg parameters.
+  repeated StrategyOrderLegParameters leg_parameters = 5;
+}
+
+// Parameters associated with a concrete leg.
+message StrategyOrderLegParameters
+{
+  // Node index in the strategy definition the parameters are related to
+  //(StrategyDefinition.node_index or LegDefinition.node_index value).
+  required uint32 node_index = 1;
+
+  // Account id to place an order on the leg. If not set, the account id of the order used instead.
+  optional sint32 account_id = 2;
+
+  // Specifies what the order is intended to do: open or close (reduce) a position. One of OpenCloseInstruction enum.
+  // Applicable only if ContractMetadata.position_tracking
+  // is either LONG_SHORT_WITH_IMPLIED_CLOSE or LONG_SHORT_WITH_EXPLICIT_CLOSE.
+  // If not set, the open/close instruction of the order used instead.
+  optional uint32 open_close_instruction = 3;
+
+  // Speculation type of the leg order. One of SpeculationType enum.
+  // If not set, the speculation type of the order used instead.
+  optional uint32 speculation_type = 4;
+}
+
+// Synthetic strategy MKT order parameters
+message StrategyMarketOrderParameters
+{
+  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index).
+  required uint32 node_index = 1;
+
+  // For Iceberg orders:
+  // 'true' means replenish qty on the filled leg immediately upon receiving primary fill;
+  // 'false' means to 'freeze' the filled leg (don't add any more qty to it) until SS order
+  //         is filled or its qty changes for some other reason, e.g. replace request.
+  optional bool replenish_on_primary_fill = 2;
+}
+
+// LMT order parameters of the root or a nested strategy.
+message StrategyLimitOrderParameters
+{
+  // Mode of overfill handling.
+  enum OverfillMode
+  {
+    // Overfills are allowed and managed by trader.
+    OVERFILL_MODE_MANUAL = 1;
+
+    // Overfills are allowed and must be hedged by the server according to strategy quantity ratios.
+    OVERFILL_MODE_AUTOMATIC_HEDGING = 2;
+
+    // Minimize probability of overfills.
+    OVERFILL_MODE_AVOID_OVERFILLS = 3;
+  }
+
+  // Defines sizes of what leg orders must be aligned to strategy lots (opposite to work proportionally).
+  enum AlignToStrategyLots
+  {
+    // Both primary and secondary leg orders could work its sizes proportionally (without aligning it to strategy lot).
+    ALIGN_TO_STRATEGY_LOTS_NONE = 1;
+
+    // Secondary leg orders must align its size to strategy lots.
+    ALIGN_TO_STRATEGY_LOTS_SECONDARY_ONLY = 2;
+
+    // Both primary and secondary leg orders align its sizes to strategy lots.
+    ALIGN_TO_STRATEGY_LOTS_ALL = 3;
+  }
+
+  // The way prices for secondary orders are calculated.
+  enum PricingMethod
+  {
+    // Respect each strategy lot price independently.
+    PRICING_METHOD_INDEPENDENT_LOT_PRICE = 1;
+
+    // Respect average strategy order price.
+    PRICING_METHOD_AVERAGE_ORDER_PRICE = 2;
+  }
+
+  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index value).
+  required uint32 node_index = 1;
+
+  // Defines whether replenish quantity on primary fill or not.
+  // For Iceberg orders:
+  //  'true' means replenish quantity on the filled leg immediately upon receiving primary fill;
+  //  'false' means to 'freeze' the filled leg (don't add any more qty to it) until SS order
+  //          is filled or its quantity changes for some other reason, e.g. replace request.
+  optional bool replenish_on_primary_fill = 2;
+
+  // Defines mode of overfill handling for this limit SS order. One of OverfillMode enums.
+  // AUTOMATIC_HEDGING is default.
+  optional uint32 overfill_mode = 3;
+
+  // Defines sizes of what leg orders must be aligned to strategy lots.One of AlignToStrategyLots enums.
+  // NONE is default.
+  optional uint32 align_to_strategy_lots = 4;
+
+  // The way prices for secondary leg orders are calculated. One of PricingMethod enums.
+  // PRICING_METHOD_AVERAGE_ORDER_PRICE is default.
+  optional uint32 pricing_method = 5;
+
+  // Price shifting parameters.
+  optional PriceShifting price_shifting = 6;
+
+  // Parameters for strategy legs.
+  repeated LimitOrderLegDescription leg_descriptions = 7;
+}
+
+// STP order parameters of the root or a nested strategy.
+message StrategyStopOrderParameters
+{
+  // Enumeration of sides of strategy price that STP orders watch for.
+  enum StopSide
+  {
+    // Bid price of strategy must be matched against STP price.
+    STOP_SIDE_BID = 1;
+
+    // Ask price of strategy must be matched against STP price.
+    STOP_SIDE_ASK = 2;
+  }
+
+  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index value).
+  required uint32 node_index = 1;
+
+  // The side of strategy price that STP orders watch for. One of StopSide enums.
+  required uint32 stop_side = 2;
+
+  // For Iceberg orders:
+  //  'true' means replenish qty on the filled leg immediately upon receiving primary fill;
+  //  'false' means to 'freeze' the filled leg (don't add any more qty to it) until SS order
+  //          is filled or its qty changes for some other reason, e.g. replace request.
+  optional bool replenish_on_primary_fill = 3;
+}
+
+message StrategyAggregationParameters
+{
+  // Mode of overfill handling.
+  enum AggrOverfillMode
+  {
+    // Minimize probability of overfills: don't place market taking LMT
+    // until existing market making LMT on other legs have quantity reduction acknowledge.
+    AGGR_OVERFILL_MODE_AVOID_OVERFILLS = 1;
+
+    // Place market taking LMTs and then attempt to reduce market making LMT quantity on other legs.
+    // There is a window of time where leg orders may be working that total more than the strategy order quantity.
+    AGGR_OVERFILL_MODE_ACCEPT_OVERFILL = 2;
+
+    // Place market taking LMT and wait to reduce market making LMT qty on other legs until
+    // the market taking LMT are filled (or cancelled after timeout).
+    // There is a much larger window of time where leg orders
+    // may be working that total more than the strategy order qty,
+    // but market making LMT don't lose their place in queue.
+    AGGR_OVERFILL_MODE_PRESERVE_QUEUE_POSITION = 3;
+  }
+
+  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index).
+  required uint32 node_index = 1;
+
+  // Mode of overfill handling. One of AggrOverfillMode enums.
+  required uint32 overfill_mode = 2;
+
+  // Price shifting parameters.
+  optional PriceShifting price_shifting = 3;
+
+  // Aggregation legs parameters.
+  repeated AggregationLegDescription pattern_legs = 4;
+}
+
+// Description of aggregation strategy legs.
+message AggregationLegDescription
+{
+  // Node index in the strategy definition the parameters are related to (LegDefinition.node_index value).
+  required uint32 node_index = 1;
+
+  // Note: use working_threshold instead.
+  optional uint32 uint32_working_threshold = 2 [deprecated = true];
+
+  // Threshold value for available quotes quantity to be considered
+  // (the quantities under this value are ignored).
+  optional cqg.Decimal working_threshold = 5;
+
+  // The leg is executed in market taking mode.
+  required MarketTakingParameters market_taking_parameters = 3;
+
+  // The leg is executed in market making mode.
+  required MarketMakingParameters market_making_parameters = 4;
+}
+
+// Parameters for strategy price change depending on filled strategy size.
+message PriceShifting
+{
+  // step (in ticks) of each price change.
+  required int32 price_step = 1;
+
+  // Note: use filled_qty_delta instead.
+  optional uint32 uint32_filled_qty_delta = 2 [deprecated = true];
+
+  // Size of strategy order that must be filled to perform next change of strategy order price.
+  optional cqg.Decimal filled_qty_delta = 3;
+}
+
+// LMT order parameters for a leg.
+message LimitOrderLegDescription
+{
+  // Node index in the strategy definition the parameters are related to
+  // (StrategyDefinition.node_index or LegDefinition.node_index value).
+  required uint32 node_index = 1;
+
+  // All the attributes below are mutually exclusive.
+  // Sets the leg as working and place LMT orders.
+  optional PrimaryOrdersLimit primary_order_limit = 2;
+
+  // Sets the leg as working and place sniper orders.
+  optional PrimaryOrdersSniper primary_order_sniper = 3;
+
+  // Sets the leg as not working and place LMT orders.
+  optional SecondaryOrdersLimit secondary_orders_limit = 4;
+
+  // Sets the leg as not working and place MKT orders.
+  optional SecondaryOrdersMarket secondary_orders_market = 5;
+
+  // Sets the leg as not working and place payup orders.
+  optional SecondaryOrdersPayUp secondary_orders_payup = 6;
+
+  // Sets the leg as not working and place trailing orders.
+  optional SecondaryOrdersTrailing secondary_orders_trailing = 7;
+
+  // Indicates how many lots (in fractions) should be filled before the second leg order is placed.
+  // Allowed range 0-1.
+  // Default is off, the secondary leg placed after all lots are filled on the primary leg.
+  optional double proportional_execution_ratio = 8;
+
+  // Determines the size of working orders based on a percentage of the resting volume
+  // available in the queue of the monitored leg.
+  // Allowed range 0-1000.
+  // Default is 1.
+  optional double volume_multiplier = 9;
+
+  // Note: use work_threshold field instead.
+  optional uint32 uint32_work_threshold = 10 [deprecated = true];
+
+  // Tells the system to work the order if and only if
+  // the available quantity in the monitored leg is and remains greater than this value.
+  // Default is 0.
+  optional cqg.Decimal work_threshold = 11;
+}
+
+// Parameters of LMT orders on a leg which is currently working.
+message PrimaryOrdersLimit
+{
+  // Mode of working primary orders with price far from market.
+  enum FarFromMarketMode
+  {
+    // Primary orders will be canceled (won't be placed) if a new target price is far from market.
+    FAR_FROM_MARKET_MODE_NO_ORDERS = 1;
+
+    // Primary orders will be moved away from market (will be left untouched) if a new target price is far from market.
+    FAR_FROM_MARKET_MODE_MOVE_AWAY_ONLY = 2;
+
+    // Primary orders will be left untouched if current and a new target price are both far from market.
+    FAR_FROM_MARKET_MODE_DONT_MOVE = 3;
+  }
+
+  // Modes of handling DOM data.
+  enum DOMUsageMode
+  {
+    // Use only top levels of DOMs and produce a single level of primary orders.
+    DOM_USAGE_MODE_TOP_ONLY = 1;
+
+    // Use multiple levels of DOMs and produce multiple levels of primary orders.
+    DOM_USAGE_MODE_MULTILEVELS = 2;
+
+    // Produce a single level of primary orders of the full quantity
+    // corresponding to the worst DOM prices with a sufficient cumulative quantity.
+    DOM_USAGE_MODE_FULL_SIZE_WORST_PRICE = 3;
+
+    // Produce a single level of primary orders of the full quantity corresponding
+    // to average DOM prices with a sufficient cumulative quantity.
+    DOM_USAGE_MODE_FULL_SIZE_AVERAGE_PRICE = 4;
+  }
+
+  // Note: use min_qty_increment field instead.
+  optional uint32 uint32_min_qty_increment = 1 [deprecated = true];
+
+  // Place an order only if the quantity available in the monitored leg is at least this much and
+  // to modify a working order only if the quantity available in the monitored leg increases by at least this much.
+  // Default is 1.
+  optional cqg.Decimal min_qty_increment = 18;
+
+  // Queue holders (stacked orders) are additional orders placed in the queue
+  // at specified price levels away from the initial working order.
+  // Sets the minimum number of orders to include in the queue.
+  // Allowed values: 1-10, default is 1.
+  optional uint32 queue_holders_min_size = 2;
+
+  // Sets the maximum number of orders to include in the queue.
+  // Allowed values: 1-10 and not less than queue_holders_min_size, default is 1.
+  optional uint32 queue_holders_max_size = 3;
+
+  // Indicates how many price levels (ticks) to skip between orders in the queue.
+  // Allowed range is 1-5, default is 1.
+  optional uint32 queue_holders_distance = 4;
+
+  // Indicates how far the market should run
+  // before maximizing size of a recently placed order that is now part of the group of stacked orders.
+  // Must be less than queue_holders_min_size, default is 0.
+  optional uint32 order_size_restore_threshold = 5;
+
+  // Note: use visible_qty field instead.
+  optional uint32 uint32_visible_qty = 6 [deprecated = true];
+
+  // Primary Iceberg order visible size in lots.
+  optional cqg.Decimal visible_qty = 19;
+
+  // Note: use min_visible_qty field instead.
+  optional uint32 uint32_min_visible_qty = 7 [deprecated = true];
+
+  // Primary Iceberg order min visible size in lots.
+  optional cqg.Decimal min_visible_qty = 20;
+
+  // Maximal distance between the market price and the old/new limit price of working primary leg
+  // orders, which allows modifications of these orders' prices(in ticks).
+  // Zero value is acceptable and means that the orders are modified at any distance.
+  // 0 is default.
+  optional uint32 working_orders_price_range = 8;
+
+  // Minimal difference between the old and the new limit prices of working
+  // primary leg orders, which allows modifications of these orders' prices (in ticks).
+  optional uint32 min_price_change = 9;
+
+  // Maximum number of leg orders per price level.
+  optional uint32 primary_orders_fifo_queue_size = 10;
+
+  // Period of updates to the working leg in milliseconds, such that every N ms,
+  // the leg is put where it ought to be placed based upon current prices.
+  // Default is to use the server settings.
+  optional uint32 force_update_period = 11;
+
+  // Flag that shows whether observed markets must be used for primary orders size calculation or not.
+  optional bool ignore_observed_markets = 12;
+
+  // Specifies (in ticks) maximum distance
+  // primary order price could be moved from target one while creating best bid/ask.
+  optional uint32 max_dimming = 13;
+
+  // Mode of handling primary leg orders with target price far from market. One of FarFromMarketMode enums.
+  // Default is to use the server settings.
+  optional uint32 far_from_market_mode = 14;
+
+  // Defines if and where server must work quantity that cannot lean onto current best bid/offer.
+  // Allowed range 0-9, default is to use the server setting.
+  optional int32 ticks_away_to_work = 15;
+
+  // How to work orders considering DOM data. One of DOMUsageMode enums. TOP_ONLY is default.
+  optional uint32 dom_usage = 16;
+
+  // Work up to this number of orders to get required volume if dom_usage is DOM_USAGE_MODE_MULTILEVELS.
+  // Allowed range 1-10, default is 1.
+  optional uint32 dom_multilevel_qty = 17;
+}
+
+// Sniper rule means don't place any primary order.
+// It just watches markets waiting for the moment when the strategy order's LMT price is available.
+// Then secondary orders on all legs must be placed.
+message PrimaryOrdersSniper
+{
+  // Duration for sniper leg orders
+  enum LegDuration
+  {
+    LEG_DURATION_DAY = 1;
+
+    // Fill and kill
+    LEG_DURATION_FAK = 2;
+
+    // Fill or kill
+    LEG_DURATION_FOK = 3;
+  }
+
+  // One of LegDuration enums.
+  required uint32 leg_duration = 1;
+}
+
+// LMT secondary orders parameters.
+message SecondaryOrdersLimit
+{
+  // Offset to adjust secondary order price at the moment of place. Default is 0.
+  optional double initial_offset = 1;
+}
+
+// MKT secondary orders parameters.
+message SecondaryOrdersMarket
+{
+}
+
+// Pay up secondary orders parameters.
+message SecondaryOrdersPayUp
+{
+  // Offset to modify the price of a hung secondary order.
+  required double offset = 1;
+
+  // Offset to adjust the secondary order price at the moment of placement.
+  optional double initial_offset = 2;
+
+  // One of the conditions below must be set.
+  // Condition to check that pointed time interval is passed.
+  optional uint32 condition_timeout = 3;
+
+  // Note: use condition_absolute_volume field instead.
+  optional uint32 uint32_condition_absolute_volume = 4 [deprecated = true];
+
+  // Condition to check the opposite market volume.
+  optional cqg.Decimal condition_absolute_volume = 7;
+
+  // Condition to check the ratio between the opposite side and secondary order sizes.
+  optional double condition_opposite_volume_ratio = 5;
+
+  // Condition to check the opposite side and the local side volumes ratio.
+  optional double condition_bba_volume_ratio = 6;
+}
+
+// Trailing secondary orders parameters.
+message SecondaryOrdersTrailing
+{
+  // Trailing offset.
+  required double trailing_offset = 1;
+
+  // Peg that price must follow. One of Order.TrailingPeg enum.
+  required uint32 trailing_peg = 2;
+
+  // Offset to adjust secondary order price at the moment of place.
+  optional double initial_offset = 3;
+
+  // Maximum distance to trail away from the initial price.
+  optional double max_trail = 4;
+
+  // One of the conditions below must be set.
+
+  // Note: use condition_absolute_volume field instead.
+  optional uint32 uint32_condition_absolute_volume = 5 [deprecated = true];
+
+  // Condition that checks the opposite market volume.
+  optional cqg.Decimal condition_absolute_volume = 8;
+
+  // Condition that checks relation between opposite side and secondary order sizes.
+  optional double condition_opposite_volume_ratio = 6;
+
+  // Condition that checks the opposite side and the local side volumes ratio.
+  optional double condition_bba_volume_ratio = 7;
+}
+
+// Aggregation market taking mode:
+// the order is held on the server until the price becomes available in at least one market;
+// at which time, the server sends an order to the exchange.
+message MarketTakingParameters
+{
+  // Type of order placed for the leg.
+  enum MarketTakingLimitOrderType
+  {
+    MARKET_TAKING_LIMIT_ORDER_TYPE_LMT = 1;
+
+    MARKET_TAKING_LIMIT_ORDER_TYPE_MKT = 2;
+  }
+
+  // Allocation percent (in range 0...1) for the leg (must total 100% among all legs).
+  required double allocation_percent = 1;
+
+  // Time period (in ms) that the order can work (after exchange ack)
+  // before the server considers it timed out and cancels it (0 means 'never',
+  // leaves order working until filled, cancelled, or expired).
+  required uint32 working_timeout = 2;
+
+  // Type of order placed for the leg. One of MarketTakingLimitOrderType enums.
+  required uint32 order_type = 3;
+}
+
+// Aggregation market making mode: the order is sent immediately to the exchanges based on the allocation percent.
+// The server then manages the orders to get them filled as quickly as possible at the given price.
+message MarketMakingParameters
+{
+  // Allocation percent (in range 0...1) for the leg (doesn't have to total 100% allocation among all legs).
+  // Default is 0, the market making mode is turned off for the leg.
+  optional double allocation_percent = 1;
+
+  // Note: use visible_qty instead.
+  optional uint32 uint32_visible_qty = 2 [deprecated = true];
+
+  // Note: use min_visible_qty instead.
+  optional uint32 uint32_min_visible_qty = 3 [deprecated = true];
+
+  // Note: use native_visible_qty instead.
+  optional uint32 uint32_native_visible_qty = 4 [deprecated = true];
+
+  // Visible size in lots.
+  optional cqg.Decimal visible_qty = 5;
+
+  // Min visible size in lots.
+  optional cqg.Decimal min_visible_qty = 6;
+
+  // Visible size of native Iceberg.
+  optional cqg.Decimal native_visible_qty = 7;
+}
+
+// Request to resolve previously reported hung quantity on a synthetic strategy order by
+// 1) placing orders to offset filled leg position(s) at current mkt price(s) and (simultaneously)
+// 2) cancelling the hung quantity.
+message SyntheticLiquidate
+{
+  // Id of an account that is used to place an order.
+  required sint32 account_id = 1;
+
+  // Order id assigned by server after last modification.
+  required string order_id = 2;
+
+  // Id of the hang from the SyntheticHang message.
+  required sint32 hang_id = 3;
+
+  // Client side time when a request was submitted (UTC).
+  // Note: use when_utc_timestamp field instead.
+  optional sint64 when_utc_time = 4 [deprecated = true];
+
+  // Client side time when a request was submitted (UTC).
+  // If specified it's used instead of when_utc_time field (at least one of these fields has to be specified).
+  optional google.protobuf.Timestamp when_utc_timestamp = 5;
+}
+
+// Request to resolve previously reported hung quantity on a synthetic strategy order by
+// 1) placing LMT orders to offset filled leg position(s) at their fill price(s) and (simultaneously)
+// 2) cancelling the hung quantity.
+message SyntheticScratch
+{
+  // Id of an account that is used to place an order.
+  required sint32 account_id = 1;
+
+  // Order id assigned by server after last modification.
+  required string order_id = 2;
+
+  // Id of the hang from the SyntheticHang message.
+  required sint32 hang_id = 3;
+
+  // Client side time when a request was submitted (UTC).
+  // Note: use when_utc_timestamp field instead.
+  optional sint64 when_utc_time = 4 [deprecated = true];
+
+  // Client side time when a request was submitted (UTC).
+  // If specified it's used instead of when_utc_time field (at least one of these fields has to be specified).
+  optional google.protobuf.Timestamp when_utc_timestamp = 5;
+}
+
+// Modify an order to get an immediate fill
+// (on either the entire order or previously reported hanging quantity on a synthetic strategy order).
+message GoMarket
+{
+  // Id of an account that is used to place an order.
+  required sint32 account_id = 1;
+
+  // Order id assigned by the server after the last modification.
+  required string order_id = 2;
+
+  // Id of the hang from the SyntheticHang message,
+  // if this request applies to hung quantity on a synthetic strategy order;
+  // Not set, if this request applies to the whole order.
+  optional sint32 hang_id = 3;
+
+  // Client side time when a request was submitted (UTC).
+  // Note: use when_utc_timestamp field instead.
+  optional sint64 when_utc_time = 4 [deprecated = true];
+
+  // Client side time when a request was submitted (UTC).
+  // If specified it's used instead of when_utc_time field (at least one of these fields has to be specified).
+  optional google.protobuf.Timestamp when_utc_timestamp = 5;
+}

@@ -1,0 +1,36 @@
+// User attributes messages
+
+syntax = "proto2";
+
+package user_attribute_2;
+
+// User defined attribute.
+message UserAttribute
+{
+  // Attribute name.
+  required string name = 1;
+
+  // Attribute value (optional for modification if attribute is deleted).
+  optional string value = 2;
+
+  // True if attribute has to be deleted during modify operation.
+  optional bool deleted = 3;
+}
+
+// Modification of order's user attributes.
+message ModifyUserAttributes
+{
+  // ID of the order chain.
+  required string chain_order_id = 1;
+
+  // ID of the order's account.
+  required sint32 account_id = 2;
+
+  // List of attributes to modify.
+  // See Order.user_attribute for additional description.
+  repeated UserAttribute user_attributes = 3;
+
+  // Flag used by the client for marking the user attributes checked/unchecked.
+  // Empty means to leave the flag the same as it was.
+  optional bool is_checked = 4;
+}

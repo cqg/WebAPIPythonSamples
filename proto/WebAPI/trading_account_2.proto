@@ -1,0 +1,230 @@
+// Trading account related messages
+
+syntax = "proto2";
+
+package trading_account_2;
+
+import "google/protobuf/timestamp.proto";
+
+// Request for a list of accounts this user is authorized to use and/ or monitor, empty message.
+message AccountsRequest
+{
+}
+
+// Response with a list of authorized accounts grouped by brokerage firms and internal sales series (account groups),
+// the same account can not belong to more than one account group.
+message AccountsReport
+{
+  // List or brokerages with accounts the user works with.
+  repeated Brokerage brokerages = 1;
+}
+
+// List of brokerage accounts.
+message Brokerage
+{
+  // Brokerage firm ID in CQG trade routing system.
+  required uint32 id = 1;
+
+  // Brokerage firm name.
+  required string name = 2;
+
+  // Brokerage type.
+  enum BrokerageType
+  {
+    // Regular.
+    BROKERAGE_TYPE_REGULAR = 1;
+
+    // Simulation.
+    BROKERAGE_TYPE_SIM = 2;
+
+    // Demo.
+    BROKERAGE_TYPE_DEMO = 3;
+  }
+
+  // This field is associated with BrokerageType enum type.
+  optional uint32 type = 4;
+
+  // List of sales series.
+  repeated SalesSeries sales_series = 3;
+}
+
+// List of accounts in a sales series group.
+message SalesSeries
+{
+  // Sales series number in CQG trade routing system.
+  required string number = 1;
+
+  // Sales series name.
+  required string name = 2;
+
+  // List of accounts.
+  repeated Account accounts = 3;
+}
+
+// Trade routing account data.
+message Account
+{
+  // Account ID in CQG trade routing system.
+  required sint32 account_id = 1;
+
+  // Account ID in Brokerage Firm.
+  required string brokerage_account_id = 2;
+
+  // Account name in CQG trade routing system.
+  required string name = 3;
+
+  // Last statement date for this account
+  // (brokerage local date in time format, use date part only).
+  required sint64 last_statement_date = 4;
+
+  // True if user can only monitor this account without trading.
+  optional bool is_view_only = 5;
+
+  // True if user was unauthorized and is not able to use/ see this account anymore.
+  optional bool is_unauthorized = 6;
+
+  // Reserved field number (do not reuse).
+  optional sint64 reserved1 = 7;
+
+  // Account connection status list.
+  // It is used for accounts that require additional authorization.
+  enum AccountConnectionStatus
+  {
+    //  Route is offline, connection is impossible.
+    ACCOUNT_CONNECTION_STATUS_OFFLINE = 1;
+
+    // Connection is not established but can be initiated by a logon message.
+    ACCOUNT_CONNECTION_STATUS_DISCONNECTED = 2;
+
+    // Connection is initiated but is not fully established.
+    ACCOUNT_CONNECTION_STATUS_CONNECTING = 3;
+
+    // Connection is established, trading is possible.
+    ACCOUNT_CONNECTION_STATUS_CONNECTED = 4;
+  }
+
+  // Current account connection status.
+  // It is set for only accounts that require authorization.
+  optional uint32 account_connection_status = 8;
+
+  // Account status last update time.
+  // It is set for only accounts that require authorization.
+  optional google.protobuf.Timestamp account_connection_status_utc_timestamp = 9;
+
+  // Optional list of authorized OTC contributors.
+  repeated string contributor_ids = 10;
+
+  // This flag shows if pre trade mid market mark should be calculated by client
+  // and provided via order extra attribute "PreTradeMidMarketMark" during order placement or modification.
+  optional bool pre_trade_mid_market_mark_required = 11;
+
+  // This flag shows if current account can be used to place orders into external accounts.
+  // See order_2.Order.external_account_number.
+  optional bool allow_external_accounts = 12;
+}
+
+// Request for balances from the last statement for all authorized accounts.
+message LastStatementBalancesRequest
+{
+}
+
+// Report with balances from the last statement for all authorized accounts.
+// Will be sent as a response to a corresponding request
+// and after each statement processing (if subscribed).
+// Each initial report contains a full snapshot of all balances on all accounts.
+// Each report for an active subscription contains updates only.
+message LastStatementBalancesReport
+{
+  repeated Balance balances = 1;
+}
+
+// Balance record for one of the accounts and one of the currencies (id is used as a key for updates).
+// Values like OTE, UPL and MVO are from statements and won't be updated in real time but after each next statement.
+// Money related values are in the specified currency.
+// NOTE: Not all values for a balance record are provided by all statements,
+//       it is up to Brokerage to include such values and only
+//       currency and ending cash balance are required to be valid.
+message Balance
+{
+  // Surrogate id as a key for updates.
+  required sint32 id = 1;
+
+  // Account of this balance record.
+  required sint32 account_id = 2;
+
+  // Statement date this positions is related.
+  required sint64 statement_date = 3;
+
+  // Currency code (ISO 4217 based).
+  required string currency = 4;
+
+  // Ending Cash Balance.
+  required double balance = 5;
+
+  // Total Account Value.
+  required double total_value = 6;
+
+  // Open Trade Equity for Futures.
+  required double ote = 7;
+
+  // Unrealized profit-loss.
+  required double upl = 8;
+
+  // Market Value of options.
+  required double mvo = 9;
+
+  // Cash Excess.
+  required double cash_excess = 10;
+
+  // Collateral on Deposit.
+  required double collateral = 11;
+
+  // Initial Margin Requirements.
+  required double initial_margin = 12;
+
+  // If true the balance should be removed from the balances snapshot.
+  optional bool deleted = 13;
+}
+
+// Request for currency rates for all brokerages user's accounts belong to.
+message CurrencyRatesRequest
+{
+}
+
+// Report with currency rates per brokerage.
+// It will be sent as a response to a corresponding request
+// and after each statement processing (if subscribed).
+message CurrencyRatesReport
+{
+  // List of rates per brokerage the user is authorized to.
+  repeated BrokerageCurrencyRates brokerage_currency_rates = 1;
+}
+
+// Currency rates of one brokerage.
+message BrokerageCurrencyRates
+{
+  // Brokerage ID.
+  required uint32 brokerage_id = 1;
+
+  // Master currency code to which rates are provided (ISO 4217 based).
+  required string master_currency = 2;
+
+  // Statement date.
+  required sint64 statement_date = 3;
+
+  // List of brokerage rates.
+  repeated CurrencyRate currency_rates = 4;
+}
+
+// Rate of one currency to a master currency for the brokerage.
+message CurrencyRate
+{
+  // Currency code (ISO 4217 based).
+  required string currency = 2;
+
+  // Exchange rate.
+  required double rate = 3;
+
+  // Number of decimals in 'rate' field.
+  optional uint32 decimal_places = 4;
+}

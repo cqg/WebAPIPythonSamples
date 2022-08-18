@@ -1,0 +1,550 @@
+// CQG Web API server protocol
+
+syntax = "proto2";
+
+package WebAPI_2;
+
+import "WebAPI/account_authorization_2.proto";
+import "WebAPI/api_limit_2.proto";
+import "WebAPI/historical_2.proto";
+import "WebAPI/instrument_definition_2.proto";
+import "WebAPI/market_data_2.proto";
+import "WebAPI/metadata_2.proto";
+import "WebAPI/metadata_admin_2.proto";
+import "WebAPI/order_2.proto";
+import "WebAPI/otc_1.proto";
+import "WebAPI/rules_1.proto";
+import "WebAPI/strategy_2.proto";
+import "WebAPI/symbol_browsing_2.proto";
+import "WebAPI/trade_routing_2.proto";
+import "WebAPI/trading_account_2.proto";
+import "WebAPI/trading_session_2.proto";
+import "WebAPI/user_session_2.proto";
+import "common/shared_1.proto";
+
+// Last changes were made on 18 May 2022
+// Version 2.87 - (version number is constructed as 'MAJOR.MINOR' from the following enums)
+
+enum ProtocolVersionMajor
+{
+  // Major number change is required in the next cases (new 'proto' file is necessary):
+  // 1) Protocol is not binary backward compatible with previous versions.
+  // 2) Protocol has lots of changes, which affect to clients' compilation.
+  PROTOCOL_VERSION_MAJOR = 2;
+}
+
+enum ProtocolVersionMinor
+{
+  // Minor number is increased for binary backward compatible protocol versions when new messages and/ or fields are
+  // added without removing/ changing any existing messages and fields (new 'proto' file is not created)
+  PROTOCOL_VERSION_MINOR = 87;
+}
+
+// Protocol rules:
+// 1)  CamelCase with an initial capital is used for message names while fields are lowercase underscore_separated_names
+//     (see https://developers.google.com/protocol-buffers/docs/style)
+// 3)  Key numbers for existing fields must stay the same between minor protocol version changes.
+// 4)  Negative values for enums and key numbers are prohibited.
+// 5)  Only explicit signed (e.g. sint32) and unsigned (e.g. uint64) integer types must be used.
+//     Usage of implicit signed integer types (e.g. int16) is prohibited
+//     since they are not supported by JS client library and consume a lot of space for negative values.
+// 6)  Unsigned types should be used for fields that cannot have negative values. This allows to minimize their size.
+// 7)  Field numbers < 16 takes one byte for a key/ wire-type header so numbers > 16
+//     should be used for optional and infrequently used fields.
+//     do not 'reserve' field numbers without real reasons.
+//     See https://developers.google.com/protocol-buffers/docs/encoding for details.
+// 8)  Field numbers don't always come in a strict order
+//     and so allow to place new fields next to logically related ones.
+// 9)  'Result' suffix is used in responses when only a single response is possible.
+// 10) 'Status' suffix is used a separate message for a status of a subscription when subscriptions are not optional.
+// 11) 'Report' suffix is used in responses when 'Result' and 'Data' are combined in a single message
+//     and when subscription is optional,
+//     this allows to avoid two messages if subscription is not requested.
+// 12) Time attributes that are 64-bit signed integers contain offset in milliseconds
+//     from base_time attribute of the logon and session restore/join results.
+// 13) Client implementation must be ready to get new values of any field associated with enum specified
+//     in this protocol (all these fields are made uint32 to make protocol backward compatible for such changes).
+//     So when client gets unknown value it should either ignore it or check whether it relates to failure
+//     (e.g. whether it's > 100 for StatusCode/ResultCode fields).
+// 14) Commodity volumes (or quantities) are specified in one of two forms: cqg.Decimal or uint64.
+//     A uint64 volume always means a number of ContractMetadata.volume_scale units.
+//     Correct volume is calculated as 'volume' * 'ContractMetadata.volume_scale' in this case.
+// 15) If a message - client or server - has two fields for the same volume (quantity):
+//     an old uint32 and a new cqg.Decimal, the latter must be used.
+//     Old volume fields are left only for compatibility with clients using the protocol before
+//     cqg.Decimals volumes introduction.
+// 16) Avoid usage of commonly used keywords in message field names.
+
+// Client to Server message, must include at least one field.
+// Logon, LogonRoutineClient, RestoreOrJoinSession or ObtainDemoCredentials are required to be the first
+// and the only message after connection.
+// Client messages rate is limited, 1000 messages per 10 seconds by default.
+// If this rate is exceeded then a user message is sent with details and the connection is closed.
+// NOTE: This and other limits mentioned in this protocol are not guaranteed, they are given for reference only
+// and are subject to change without prior notice.
+message ClientMsg
+{
+  // Session level messages from client.
+  optional user_session_2.Logon logon = 100;
+  optional user_session_2.RestoreOrJoinSession restore_or_join_session = 101;
+  optional user_session_2.Logoff logoff = 102;
+  optional user_session_2.PasswordChange password_change = 103;
+  optional user_session_2.ObtainDemoCredentials obtain_demo_credentials = 104;
+  optional user_session_2.UserSessionStateRequest user_session_state_request = 105;
+  optional user_session_2.Ping ping = 107;
+  optional user_session_2.Pong pong = 108;
+  optional user_session_2.LogonRoutineClient logon_routine_client = 109;
+  optional user_session_2.PasswordChangeRoutineClient password_change_routine_client = 110;
+  optional user_session_2.SetCollapsingLevelRequest set_collapsing_level_request = 111;
+
+  // Requests for different information with optional subscription for updates.
+  // There are the following limits for information requests:
+  // 1) Information request rate is limited, 1000 requests per 100 seconds by default.
+  // 2) Number of simultaneous information subscriptions is limited,
+  //    a separate limit per information request type is used.
+  // 3) Number of overall information requests per session is limited,
+  //    a separate limit per information request type is used.
+  repeated InformationRequest information_requests = 1;
+
+  // Trade routing subscriptions from client.
+  // There are the following limits for trade routing subscriptions:
+  // 1) Number of simultaneous subscriptions is limited, 200 by default.
+  // 2) Total number of either explicitly or implicitly subscribed accounts is limited, 5000 by default.
+  //    Any subscription that leads to exceeding this limit is failed.
+  repeated trade_routing_2.TradeSubscription trade_subscriptions = 2;
+
+  // Order requests.
+  // Request rate is limited, 300 orders per 10 seconds by default.
+  // This is total limit for order actions amount all accounts within the session.
+  // There is also per account limit which is 10 order requests per second by default.
+  repeated order_2.OrderRequest order_requests = 3;
+
+  // Market data subscriptions from client.
+  // Subscriptions number is limited, 200 simultaneous subscriptions by default.
+  // Subscriptions on options strikes (puts and calls) of the same option maturity
+  // are considered as a single subscription within the limit.
+  repeated market_data_2.MarketDataSubscription market_data_subscriptions = 4;
+
+  // Historical data requests.
+  // Number of simultaneous historical requests in processing is limited, 10 by default
+  // (all types of historical requests together).
+  // Number of simultaneous historical requests with subscription for updates is limited, 50 by default
+  // (all types of historical requests together).
+  repeated historical_2.TimeAndSalesRequest time_and_sales_requests = 7;
+  repeated historical_2.TimeBarRequest time_bar_requests = 8;
+  repeated historical_2.VolumeProfileRequest volume_profile_requests = 9;
+  repeated historical_2.NonTimedBarRequest non_timed_bar_requests = 14;
+
+  // Rules requests.
+  // Number of simultaneous defined rules is limited, 100 by default.
+  repeated rules_1.RuleRequest rule_requests = 10;
+
+  // Messages for accounts that require separate authorization process.
+  repeated account_authorization_2.AccountLogon account_logon_requests = 11;
+  repeated account_authorization_2.AccountPasswordChange account_password_change_requests = 12;
+  repeated account_authorization_2.AccountLogoff account_logoff_requests = 13;
+
+  // Meta-data related requests is an administrative message to manipulate
+  // Security and instrument settings.
+  // It requires a special permission.
+  // Request rate is limited, 100 requests per 100 seconds by default.
+  repeated metadata_admin_2.MetadataAdminRequest metadata_admin_requests = 15;
+
+  // OTC related requests.
+  // Used to receive data from OTC and manipulate OTC instances.
+  repeated otc_1.OtcRequest otc_requests = 16;
+
+  // RFQ requests.
+  // Request rate is limited, 10 requests per second per account by default.
+  repeated market_data_2.RFQRequest rfq_requests = 17;
+
+  // Option calculation requests.
+  // Number of simultaneous option calculation requests with subscription for updates is limited, 10 by default.
+  repeated market_data_2.OptionCalculationRequest option_calculation_requests = 18;
+
+  // Reserved for internal use.
+  extensions 200 to 249;
+}
+
+// Server to Client message, server can include different fields in a single message.
+message ServerMsg
+{
+  // Session level messages from server.
+  optional user_session_2.LogonResult logon_result = 100;
+  optional user_session_2.RestoreOrJoinSessionResult restore_or_join_session_result = 101;
+  repeated user_session_2.ConcurrentConnectionJoin concurrent_connection_join_results = 111;
+  optional user_session_2.LoggedOff logged_off = 102;
+  optional user_session_2.PasswordChangeResult password_change_result = 103;
+  repeated user_session_2.UserMessage user_messages = 104;
+  repeated user_session_2.ObtainDemoCredentialsResult obtain_demo_credentials_results = 105;
+  repeated user_session_2.UserSessionStateResult user_session_state_results = 106;
+  optional user_session_2.Ping ping = 107;
+  optional user_session_2.Pong pong = 108;
+  optional user_session_2.LogonRoutineServer logon_routine_server = 109;
+  optional user_session_2.PasswordChangeRoutineServer password_change_routine_server = 110;
+  repeated user_session_2.SetCollapsingLevelResult set_collapsing_level_results = 112;
+
+  // Reports with requested information.
+  repeated InformationReport information_reports = 1;
+
+  // Trade routing messages from server.
+  repeated order_2.OrderRequestReject order_request_rejects = 2;
+  repeated trade_routing_2.TradeSubscriptionStatus trade_subscription_statuses = 3;
+  repeated trade_routing_2.TradeSnapshotCompletion trade_snapshot_completions = 4;
+  repeated order_2.OrderStatus order_statuses = 5;
+  repeated trade_routing_2.PositionStatus position_statuses = 6;
+  repeated trade_routing_2.CollateralStatus collateral_statuses = 7;
+
+  // Market data messages from server.
+  repeated market_data_2.MarketDataSubscriptionStatus market_data_subscription_statuses = 8;
+  repeated market_data_2.RealTimeMarketData real_time_market_data = 9;
+
+  /// Historical data.
+  repeated historical_2.TimeAndSalesReport time_and_sales_reports = 12;
+  repeated historical_2.TimeBarReport time_bar_reports = 13;
+  repeated historical_2.VolumeProfileReport volume_profile_reports = 14;
+  repeated historical_2.NonTimedBarReport non_timed_bar_reports = 19;
+
+  // Results of rules requests.
+  repeated rules_1.RuleResult rule_results = 15;
+
+  // Result messages for accounts that require separate authorization process.
+  repeated account_authorization_2.AccountLogonResult account_logon_results = 16;
+  repeated account_authorization_2.AccountPasswordChangeResult account_password_change_results = 17;
+  repeated account_authorization_2.AccountLogoffResult account_logoff_results = 18;
+
+  // Results of Meta-data change request.
+  repeated metadata_admin_2.MetadataAdminResult metadata_admin_results = 20;
+
+  // Results of OTC request.
+  repeated otc_1.OtcReport otc_reports = 21;
+
+  // RFQ reports.
+  repeated market_data_2.RFQReport rfq_reports = 22;
+
+  // Results of option calculation request.
+  repeated market_data_2.OptionCalculationReport option_calculation_reports = 23;
+
+  // Reserved for internal use.
+  extensions 200 to 249;
+}
+
+// Request for information.
+// There must be only one request type
+// (e.g. accountsRequest and lastStatementBalancesRequest can not be sent at the same time).
+message InformationRequest
+{
+  // ID of a request and optional subscription that should be unique enough to match responses
+  // and updates with corresponding requests.
+  required uint32 id = 1;
+
+  // If set to true then corresponding reports are also sent when requested information is changed during the session.
+  // If set to false then subscription is dropped.
+  // If omitted then data is returned without changing subscription status.
+  optional bool subscribe = 2;
+
+  // Request for authorized accounts for trading.
+  // Only one subscription is possible.
+  // Request rate is limited, 100 per 24 hours by default.
+  // Request is accepted only if the user is not subscribed
+  // and there is no pending request for this information at the moment.
+  optional trading_account_2.AccountsRequest accounts_request = 3;
+
+  // Request symbol resolution with optional subscription.
+  // Request rate is limited, 10000 per 24 hours by default.
+  // NOTE: subscription is essential to follow active contract switching.
+  optional metadata_2.SymbolResolutionRequest symbol_resolution_request = 4;
+
+  // Request for balances from the last statement for all authorized accounts.
+  // Only one subscription is possible.
+  // Request rate is limited, 100 per 24 hours by default.
+  // Request is accepted only if the user is not subscribed
+  // and there is no pending request for this information at the moment.
+  optional trading_account_2.LastStatementBalancesRequest last_statement_balances_request = 5;
+
+  // Request for currency rates for all brokerages user's accounts belong to.
+  // Only one subscription is possible.
+  // Request rate is limited, 100 per 24 hours by default.
+  // Request is accepted only if the user is not subscribed
+  // and there is no pending request for this information at the moment.
+  optional trading_account_2.CurrencyRatesRequest currency_rates_request = 6;
+
+  // Request for session information.
+  // Number of simultaneous requests in processing is limited, 10 by default.
+  // Number of simultaneous session information update subscriptions is limited, 200 by default.
+  // Request is accepted only if the user is not subscribed for this information at the moment.
+  optional trading_session_2.SessionInformationRequest session_information_request = 7;
+
+  // Request for a list of historical orders (including all transactions) according to a search criteria.
+  // Number of simultaneous requests in processing is limited, 1 by default.
+  // The request depth is limited, 30 days by default.
+  // Subscription is not supported for this request.
+  optional trade_routing_2.HistoricalOrdersRequest historical_orders_request = 13;
+
+  // Request a list of option maturities.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Number of simultaneous update subscriptions is limited, 100 by default.
+  optional metadata_2.OptionMaturityListRequest option_maturity_list_request = 14;
+
+  // Request a group of instruments.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Number of simultaneous update subscriptions is limited, 100 by default.
+  optional metadata_2.InstrumentGroupRequest instrument_group_request = 15;
+
+  // Request at-the-money strike for the option maturity.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Number of simultaneous update subscriptions is limited, 100 by default.
+  optional market_data_2.AtTheMoneyStrikeRequest at_the_money_strike_request = 16;
+
+  // Request strategy definition with no subscription.
+  // Request rate is limited, 10000 per 24 hours by default.
+  optional strategy_2.StrategyDefinitionRequest strategy_definition_request = 17;
+
+  // Request for session timerange information.
+  // Number of simultaneous requests in processing is limited, 10 by default.
+  // The request range is limited. 1 year/1000 sessions by default.
+  // Subscription is NOT supported for this request, so subscribe flag will be ignored.
+  optional trading_session_2.SessionTimeRangeRequest session_timerange_request = 18;
+
+  // Request for trading day timerange information.
+  // Number of simultaneous requests in processing is limited, 10 by default.
+  // The request range is limited. 1 year/250 trading days by default.
+  // Subscription is NOT supported for this request, so subscribe flag will be ignored.
+  optional trading_session_2.TradingDayTimeRangeRequest trading_day_timerange_request = 19;
+
+  // Request of order entitlements.
+  // Number of simultaneous requests in processing is limited, 100 by default.
+  // Subscription is not supported for this request.
+  optional order_2.OrderEntitlementRequest order_entitlement_request = 20;
+
+  // Request for a symbol category tree for a particular root. each category can have a list of sub-categories.
+  // Number of simultaneous requests in processing is limited, 100 by default.
+  // Number of simultaneous update subscriptions is limited, 100 by default.
+  // There can be only one subscription per category root for updates.
+  optional symbol_browsing_2.SymbolCategoryListRequest symbol_category_list_request = 21;
+
+  // Request for a specific category by its ID.
+  // Number of simultaneous requests in processing is limited, 1000 by default.
+  // Number of simultaneous update subscriptions is limited, 1000 by default.
+  optional symbol_browsing_2.SymbolCategoryRequest symbol_category_request = 27;
+
+  // Request for a list of category symbols matching input instrument client type.
+  // Requests rate is limited, 30 per 60 seconds by default.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Subscription is not supported for this request.
+  optional symbol_browsing_2.SymbolCategoryListByInstrumentTypeRequest
+    symbol_category_list_by_instrument_type_request = 33;
+
+  // Request for a list of symbols according to a specified filter.
+  // Number of simultaneous requests in processing is limited, 150 by default.
+  // Number of simultaneous update subscriptions is limited, 150 by default.
+  optional symbol_browsing_2.SymbolListRequest symbol_list_request = 22;
+
+  // Request for a specific symbol by its ID.
+  // Request rate is limited, 10000 per 24 hours by default.
+  // Number of simultaneous requests in processing is limited, 150 by default.
+  // Subscription is not supported for this request.
+  optional symbol_browsing_2.SymbolRequest symbol_request = 23;
+
+  // Request for a list of entitlements of the current user.
+  // Subscription is not supported for this request yet.
+  optional shared_1.EntitlementRequest entitlement_request = 24;
+
+  // Request contract metadata by contract ID.
+  optional metadata_2.ContractMetadataRequest contract_metadata_request = 25;
+
+  // Request algo strategy definitions.
+  // Number of simultaneous requests in processing is limited, 100 by default.
+  // Subscription is not supported for this request.
+  optional strategy_2.AlgoStrategyDefinitionRequest algo_strategy_definition_request = 26;
+
+  // Request contributor metadata by contributor group ID.
+  // Request rate is limited, 300 per 1 hour by default.
+  optional metadata_2.ContributorMetadataRequest contributor_metadata_request = 28;
+
+  // WebAPI user limits request.
+  // Number of subscriptions and simultaneous requests in processing is limited, 1 by default.
+  optional api_limit_2.ApiLimitRequest api_limit_request = 29;
+
+  // Request for trading feature entitlements.
+  // Number of simultaneous requests in processing is limited, 100 by default.
+  // Subscription is not supported for this request.
+  optional trade_routing_2.BrokerageTradingFeatureEntitlementRequest brokerage_trading_feature_entitlement_request = 30;
+
+  // Request for a single order status.
+  // Request rate is limited, 5 per 5 seconds by default.
+  // Subscription is not supported for this request.
+  optional order_2.OrderStatusRequest order_status_request = 31;
+
+  // Request for a list of product symbols matching the search criteria.
+  // Requests rate is limited, 30 per 60 seconds by default.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Subscription is not supported for this request.
+  optional symbol_browsing_2.ProductSearchRequest product_search_request = 32;
+
+  // Request MarketState metadata by MarketState group ID.
+  // Request rate is limited, 300 per 1 hour by default.
+  optional metadata_2.MarketStateMetadataRequest market_state_metadata_request = 34;
+
+  // Request (non-strategy) instrument definition with no subscription.
+  // Request rate is limited, 10000 per 24 hours by default.
+  optional instrument_definition_2.InstrumentDefinitionRequest instrument_definition_request = 35;
+
+  // Request metadata of available exchanges
+  // Number of subscriptions and simultaneous requests in processing is limited, 1 by default.
+  optional metadata_2.ExchangeMetadataRequest exchange_metadata_request = 36;
+}
+
+// Report with requested information and subscription updates.
+// It will contain only one report type at the same time (related to id).
+message InformationReport
+{
+  // Report ID is equal to a corresponding request and subscription ID.
+  required uint32 id = 1;
+
+  // True means that requested data is complete at the moment,
+  // false means more report messages are expected for completeness.
+  optional bool is_report_complete = 2 [default = true];
+
+  // Optional status code for a request or subscription, status is only sent for initial status and status changes.
+  enum StatusCode
+  {
+    /// success codes  (0 - 99)
+    // Request is processed without subscription
+    // (subscription was not requested or can not be established, e.g. for deleted contracts).
+    STATUS_CODE_SUCCESS = 0;
+
+    // Request is processed and subscription is established.
+    STATUS_CODE_SUBSCRIBED = 1;
+
+    // Subscription is dropped by a client request.
+    STATUS_CODE_DROPPED = 2;
+
+    // Unsolicited information update because of subscription.
+    STATUS_CODE_UPDATE = 3;
+
+    // Currently subscription is disconnect because of communication issues.
+    // NOTE: Clients should not resubscribe in this case, the server will restore subscription with
+    // sending SUBSCRIBED status once communication issues are resolved.
+    STATUS_CODE_DISCONNECTED = 4;
+
+    /// failure codes (100+), subscription (if any) is dropped in case of failure.
+    // General failure.
+    STATUS_CODE_FAILURE = 101;
+
+    // Request parameters are invalid.
+    STATUS_CODE_INVALID_PARAMS = 102;
+
+    // Requested information is not found.
+    STATUS_CODE_NOT_FOUND = 104;
+
+    // The request rate limit has been violated.
+    STATUS_CODE_REQUEST_RATE_LIMIT_VIOLATION = 105;
+
+    // The limit of subscriptions has been violated.
+    STATUS_CODE_SUBSCRIPTION_LIMIT_VIOLATION = 106;
+
+    // The limit of active requests has been violated.
+    STATUS_CODE_ACTIVE_REQUESTS_LIMIT_VIOLATION = 107;
+
+    // The response is too large to return. Try more specific request parameters to narrow response size if possible.
+    STATUS_CODE_TOO_LARGE_RESPONSE = 108;
+  }
+
+  // This field is associated with StatusCode enum type.
+  required uint32 status_code = 3;
+
+  // Possible details of status or failure.
+  optional string text_message = 4;
+
+  // Report with trading accounts.
+  optional trading_account_2.AccountsReport accounts_report = 5;
+
+  // Resolved symbol initial information or update.
+  optional metadata_2.SymbolResolutionReport symbol_resolution_report = 6;
+
+  // Report with balances from the last statement for all authorized accounts.
+  optional trading_account_2.LastStatementBalancesReport last_statement_balances_report = 7;
+
+  // Report with currency rates per brokerage.
+  optional trading_account_2.CurrencyRatesReport currency_rates_report = 8;
+
+  // Report with session information.
+  optional trading_session_2.SessionInformationReport session_information_report = 9;
+
+  // Report with a list of historical orders according to specified parameters.
+  optional trade_routing_2.HistoricalOrdersReport historical_orders_report = 15;
+
+  // Report with a list of option maturities.
+  optional metadata_2.OptionMaturityListReport option_maturity_list_report = 16;
+
+  // Report with a group of instruments.
+  optional metadata_2.InstrumentGroupReport instrument_group_report = 17;
+
+  // Report with at-the-money strikes.
+  optional market_data_2.AtTheMoneyStrikeReport at_the_money_strike_report = 18;
+
+  // Report with the defined strategy metadata.
+  // This field can be filled in case of STATUS_CODE_FAILURE, if the exchange response contains a strategy
+  // that differs significantly from the requested one.
+  // Example: user wants to define UDS(A - B), but opposite UDS(B - A) already exists on exchange.
+  optional strategy_2.StrategyDefinitionReport strategy_definition_report = 19;
+
+  // Report with session timerange information.
+  optional trading_session_2.SessionTimeRangeReport session_timerange_report = 20;
+
+  // Report with trading day timerange information.
+  optional trading_session_2.TradingDayTimeRangeReport trading_day_timerange_report = 21;
+
+  // Report with order entitlements.
+  optional order_2.OrderEntitlementReport order_entitlement_report = 22;
+
+  // Report with a symbol category tree for a particular root.
+  optional symbol_browsing_2.SymbolCategoryListReport symbol_category_list_report = 23;
+
+  // Report with a symbol category.
+  optional symbol_browsing_2.SymbolCategoryReport symbol_category_report = 29;
+
+  // Report with a list of matched category symbols.
+  optional symbol_browsing_2.SymbolCategoryListByInstrumentTypeReport
+    symbol_category_list_by_instrument_type_report = 35;
+
+  // Report with a list of found symbols.
+  optional symbol_browsing_2.SymbolListReport symbol_list_report = 24;
+
+  // Report with a symbol.
+  optional symbol_browsing_2.SymbolReport symbol_report = 25;
+
+  // Report with a list of entitlements of the current user.
+  optional shared_1.EntitlementReport entitlement_report = 26;
+
+  // Report with the requested contract metadata.
+  optional metadata_2.ContractMetadataReport contract_metadata_report = 27;
+
+  // Report with algo strategies definitions.
+  optional strategy_2.AlgoStrategyDefinitionReport algo_strategy_definition_report = 28;
+
+  // Report with contributor metadata.
+  optional metadata_2.ContributorMetadataReport contributor_metadata_report = 30;
+
+  // Report with WebAPI limit values.
+  optional api_limit_2.ApiLimitReport api_limit_report = 31;
+
+  // Report with trading feature entitlements.
+  optional trade_routing_2.BrokerageTradingFeatureEntitlementReport brokerage_trading_feature_entitlement_report = 32;
+
+  // Report with an order status.
+  optional order_2.OrderStatusReport order_status_report = 33;
+
+  // Report with a list of found product symbols.
+  optional symbol_browsing_2.ProductSearchReport product_search_report = 34;
+
+  // Report with Market State/Status metadata.
+  optional metadata_2.MarketStateMetadataReport market_state_metadata_report = 36;
+
+  // Report with the defined (non-strategy) instrument metadata.
+  optional instrument_definition_2.InstrumentDefinitionReport instrument_definition_report = 37;
+
+  // Report with exchange metadata
+  optional metadata_2.ExchangeMetadataReport exchange_metadata_report = 38;
+}

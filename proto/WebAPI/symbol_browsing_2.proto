@@ -1,0 +1,330 @@
+// Symbol browsing related messages.
+
+syntax = "proto2";
+
+package symbol_browsing_2;
+
+import "WebAPI/metadata_2.proto";
+import "WebAPI/metadata_admin_2.proto";
+import "common/decimal.proto";
+import "common/shared_1.proto";
+
+// Symbol structure.
+// It can represent either a product, a security, a maturity or a contract.
+// So only one of corresponding *_metadata fields can be specified.
+message Symbol
+{
+  // Symbol Identifier.
+  required string id = 1;
+
+  // Symbol readable name.
+  required string name = 2;
+
+  // Symbol description.
+  required string description = 3;
+
+  // CFI code (Classification of Financial Instruments, ISO 10962) if appropriate.
+  // Deprecated and should not be used. Use nested metadata messages.
+  optional string cfi_code = 4 [deprecated = true];
+
+  // True if this symbol has child symbols (false for leafs of the symbol tree).
+  optional bool has_child_symbols = 5;
+
+  // Deleted flag is used in updates when the symbol is either removed (e.g. expired) or
+  // no longer meets request filtering criterias (e.g. SymbolListRequest.category_id filter).
+  // Note: list of categories in category_id field (see below) may be cleared when symbol is removed.
+  optional bool deleted = 7;
+
+  // Last trading date for derivatives if applicable.
+  // (local exchange date in time format, use date part only).
+  // Deprecated and should not be used. Use nested metadata messages.
+  optional sint64 last_trading_date = 8 [deprecated = true];
+
+  // Month letter and 2-digit year identifying the maturity month of the symbol.
+  // Note: look at comment for maturity_month_year from ContractMetadata for further info.
+  // Deprecated and should not be used. Use nested metadata messages.
+  optional string maturity_month_year = 9 [deprecated = true];
+
+  // Name of a group of symbols that share the same properties (e.g. commodity name for futures and options).
+  // Deprecated and should not be used. Use nested metadata messages.
+  optional string instrument_group_name = 10 [deprecated = true];
+
+  // ID of the parent symbol (if this is not the root symbol - product).
+  // If this field is empty, product_metadata field is set.
+  optional string parent_symbol_id = 11;
+
+  // List of categories of this symbol, if any.
+  // See SymbolCategory and SymbolCategoryRequest messages.
+  repeated string category_ids = 12;
+
+  // Deprecated and should not be used. Use SecurityMetadata.source_instrument_group_name or
+  // ContractMetadata.source_contract_id instead.
+  optional string source_symbol_id = 13 [deprecated = true];
+
+  // Rank value of the symbol for sorting peer symbols in user interfaces. Higher value means greater priority.
+  optional uint32 rank = 17;
+
+  // Meta-data of a product if this symbol describes one (aka Symbol Root Key).
+  // If this field is set, this symbol doesn't have a parent symbol.
+  optional ProductMetadata product_metadata = 14;
+
+  // Meta-data of a security if this symbol describes one (aka Symbol Prefix Key).
+  optional SecurityMetadata security_metadata = 15;
+
+  // Meta-data of options maturity group if this symbol describes one (aka Option Lead Key).
+  optional metadata_2.OptionMaturityMetadata option_maturity_metadata = 16;
+
+  // Contract meta-data if a symbol is a specific contract (leaf of the symbol tree).
+  optional metadata_2.ContractMetadata contract_metadata = 6;
+}
+
+// Symbol category.
+message SymbolCategory
+{
+  // Category identifier.
+  // Note: this identifier is not guaranteed to be stable, so categories should be
+  // obtained e.g. via SymbolCategoryListRequest or SymbolCategoryListByInstrumentTypeRequest
+  // instead of being saved using this id between sessions.
+  required string id = 1;
+
+  // Category name.
+  required string name = 2;
+
+  // Category description.
+  optional string description = 3;
+
+  // Category parent identifier. Omitted for root categories.
+  optional string parent_id = 4;
+
+  // Indicates whether this category can be used as a filter for getting a list of symbols.
+  required bool can_filter = 5;
+
+  // If the category is an exchange then this field defines exchange id.
+  // See ExchangeMetadata.exchange_id.
+  optional sint32 exchange_id = 6;
+
+  // If the category is a OTC contributor then this field defines contributor ID.
+  optional string contributor_id = 7;
+
+  // Deleted flag is used in updates when the category is removed.
+  optional bool deleted = 8;
+}
+
+// Request for a symbol category [sub-]tree for a particular root. each category can have a list of sub-categories.
+// A list of roots can be requested using an empty list of category IDs.
+message SymbolCategoryListRequest
+{
+  // Category Identifier to request corresponding sub-tree.
+  // Do not specify category ID to get categories from roots.
+  optional string category_id = 1;
+
+  // Optional depth. One level is returned if not specified.
+  optional uint32 depth = 2;
+}
+
+// Report with a symbol category tree for a particular root.
+message SymbolCategoryListReport
+{
+  // List of categories linked to their parents.
+  repeated SymbolCategory symbol_categories = 1;
+}
+
+// Request for a specific category by ID.
+message SymbolCategoryRequest
+{
+  // Category Identifier to request corresponding category.
+  optional string category_id = 1;
+}
+
+// Report with a category.
+message SymbolCategoryReport
+{
+  optional SymbolCategory symbol_category = 1;
+}
+
+// Instrument client type.
+// Values of this type are known to be stable in contrast to symbol category ids
+// and so they can be hard-coded in client code.
+// Only spread-related types are supported so far.
+enum InstrumentClientType
+{
+  INSTRUMENT_CLIENT_TYPE_UNKNOWN = 0;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_BUNDLE = 1;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_CONDOR = 2;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_DOUBLE_BUTTERFLY = 3;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_FUTURES_INTER_COMMODITY = 4;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_BUTTERFLY = 5;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_PACK = 6;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_PACK_BUTTERFLY = 7;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_REDUCED_TICK_CALENDAR = 8;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_CALENDAR = 9;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_STRIP = 11;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_REVERSE_CALENDAR = 12;
+  INSTRUMENT_CLIENT_TYPE_SPREAD_MONTH_VS_PACK = 14;
+}
+
+// Request for a list of category symbols matching input instrument client type.
+message SymbolCategoryListByInstrumentTypeRequest
+{
+  // Instrument client type.
+  // This field is associated with InstrumentClientType.Type enum.
+  // INSTRUMENT_CLIENT_TYPE_UNKNOWN is used if this field is empty.
+  optional uint32 instrument_client_type = 1;
+}
+
+// Report with a list of category symbols matching input instrument client type.
+message SymbolCategoryListByInstrumentTypeReport
+{
+  repeated SymbolCategory symbol_categories = 1;
+}
+
+// Request for a list of symbols according to a filter.
+// At least one filter field has to be specified.
+// Number of symbols in response is limited (default is 10000).
+// Note: Symbols related to option strikes are not returned unless symbol id of
+// corresponding option maturity symbol is specified as a parent_symbol_id in the request.
+message SymbolListRequest
+{
+  // Optional category filter controlling how multiple symbol categories are applied in the filter.
+  // Categories within the same tree (having the same root) are applied by "OR" in the category filter
+  // (e.g. two exchanges, either matches). Otherwise categories are applied by "AND" (e.g. exchange and asset).
+  // See SymbolCategory and SymbolCategoryListRequest messages.
+  repeated string category_ids = 1;
+
+  // Number of levels in the symbol tree to return from the top of the symbol tree
+  // (i.e. from product level) or from the parent symbol (if specified).
+  // Symbols from deeper levels are excluded from the results.
+  // One level is returned if the field is omitted.
+  optional uint32 depth = 2;
+
+  // Parent symbol id filter to return only child symbols of this parent.
+  // If this field is specified, depth must be one or omitted.
+  optional string parent_symbol_id = 3;
+}
+
+// Report with a list of found symbols.
+message SymbolListReport
+{
+  // List of symbols.
+  repeated Symbol symbols = 1;
+}
+
+// Request for a specific symbol by ID.
+message SymbolRequest
+{
+  // ID of a symbol to request.
+  required string symbol_id = 1;
+}
+
+// Report with a symbol.
+message SymbolReport
+{
+  optional Symbol symbol = 1;
+}
+
+message ProductMetadata
+{
+  optional string product_id = 1;
+}
+
+// Metadata used for real-time and trading data processing for a group of contracts.
+// Note that for some contracts tick_size, tick_value or contract_size_in_units values on
+// ContractMetadata level might differ from corresponding values in ProcessingMetadata
+// (e.g., tick_size and tick_value for VTS contracts or contract_size_in_units for some option contracts).
+// In these cases ContractMetadata values should be used.
+message ProcessingMetadata
+{
+  // Currency code (ISO 4217 based).
+  optional string currency = 1;
+
+  // Size or a single market tick in correct price format.
+  optional double tick_size = 2;
+
+  // Tick money value in corresponding currency. See ProcessingMetadata.currency.
+  optional double tick_value = 3;
+
+  // Contract size in the number of units (where defined). Unit is defined by contract_size_unit field.
+  optional cqg.Decimal contract_size_in_units = 4;
+
+  // Unit label for the contract size.
+  optional shared_1.Text contract_size_unit = 5;
+
+  // Security whose contracts should be used to fill PublishContract.currency_rate_contract_id.
+  // Use InstrumentGroupRequest to query contracts by group name.
+  optional string currency_rate_instrument_group_name = 6;
+
+  // Security whose contracts should be used to fill PublishContract.currency_hedge_contractd_id.
+  // Use InstrumentGroupRequest to query contracts by group name.
+  optional string currency_hedge_instrument_group_name = 7;
+}
+
+message SecurityMetadata
+{
+  optional string security_id = 1;
+
+  // CFI code (Classification of Financial Instruments, ISO 10962).
+  optional string cfi_code = 2;
+
+  // Deprecated and should not be used. Use ProcessingMetadata.currency instead.
+  optional string currency = 3 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.tick_size instead.
+  optional double tick_size = 4 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.tick_value instead.
+  optional double tick_value = 5 [deprecated=true];
+
+  // Deprecated and should not be used.
+  optional uint32 period_type = 6 [deprecated=true];
+
+  // Deprecated and should not be used.
+  optional uint32 period_value = 7 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.contract_size_in_units instead.
+  optional cqg.Decimal contract_size_in_units = 8 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.contract_size_unit instead.
+  optional shared_1.Text contract_size_unit = 9 [deprecated=true];
+
+  // Optional custom security parameters per associated OTC contributor (if any).
+  repeated metadata_admin_2.ContributorParameters contributor_parameters = 10;
+
+  // ID of the symbol the security represents (Symbol.id attribute).
+  optional string symbol_id = 11;
+
+  // If this security represents a list of double-quoted contracts, the field contains identifier
+  // to request list of corresponding source instruments (see InstrumentGroupRequest).
+  optional string source_instrument_group_name = 12;
+
+  // Metadata used for real-time and trading data processing. 
+  // There might be different metadata properties for different contracts within the security.
+  repeated ProcessingMetadata processing_metadata = 13;
+}
+
+// Request for a list of product symbols matching a search criteria (see Symbol.product_metadata).
+message ProductSearchRequest
+{
+  // Term to search matched product symbols on.
+  // Search term needs to be filled and its length must be greater than 3 (by default) if category_id filter is empty.
+  // Searching is done on the text associated to the being searched product symbols.
+  // Matching is supported only by "starts with" pattern.
+  // Multi-word input (whitespace delimited) is applied by "or".
+  // I.e. it matches a symbol if any word from the search term matches.
+  optional string search_term = 1;
+
+  // Optional category filter controlling how multiple symbol categories are applied in the filter.
+  // Categories within the same tree (having the same root) are applied by "OR" in the category filter
+  // (e.g. two exchanges, either matches). Otherwise categories are applied by "AND" (e.g. exchange and asset).
+  // See SymbolCategory and SymbolCategoryListRequest messages.
+  repeated string category_ids = 2;
+
+  // Reserved field number (do not reuse).
+  optional bool reserved1 = 3;
+}
+
+// Report with a list of found product symbols.
+message ProductSearchReport
+{
+  // List of product symbols.
+  repeated Symbol symbols = 1;
+}

@@ -1,0 +1,1012 @@
+// Historical related messages
+
+syntax = "proto2";
+
+package historical_2;
+
+import "WebAPI/market_data_2.proto";
+import "common/decimal.proto";
+import "common/shared_1.proto";
+
+// Parameters for Time and Sales request.
+message TimeAndSalesParameters
+{
+  // contract id for Time and Sales request.
+  required uint32 contract_id = 1;
+
+  // Level or requested Time and Sales data.
+  enum Level
+  {
+    // Get trades with volumes and settlement quotes.
+    LEVEL_TRADES = 1;
+
+    // Get trades, settlement and best ask & bid quotes with volumes.
+    LEVEL_TRADES_BBA_VOLUMES = 3;
+  }
+
+  // This field is associated with Level enum type.
+  required uint32 level = 2;
+
+  // Time and Sales period time to start from.
+  required sint64 from_utc_time = 3;
+
+  // Optional Time and Sales period finish time.
+  // Latest allowed and available time is used if it is not specified.
+  optional sint64 to_utc_time = 4;
+
+  // Includes Off Market trade quotes in report.
+  optional bool include_off_market_trades = 5;
+
+  // Quotes from report include trade attributes.
+  optional bool include_trade_attributes = 6;
+}
+
+// Time and sales request (30 days history limit).
+message TimeAndSalesRequest
+{
+  // Request ID, should be unique among currently processed requests.
+  required uint32 request_id = 1;
+
+  // parameters of a request, ignored for a REQUEST_TYPE_DROP operation.
+  optional TimeAndSalesParameters time_and_sales_parameters = 2;
+
+  // Type of request.
+  enum RequestType
+  {
+    // Request.
+    REQUEST_TYPE_GET = 1;
+
+    // Drop request.
+    REQUEST_TYPE_DROP = 3;
+  }
+
+  // This field is associated with RequestType enum type. REQUEST_TYPE_GET operation is processed by default.
+  optional uint32 request_type = 3;
+}
+
+// Time and sales report
+message TimeAndSalesReport
+{
+  // ID of a corresponding request.
+  required uint32 request_id = 1;
+
+  // Result code.
+  enum ResultCode
+  {
+    /// success codes  (0 - 99)
+    // Request is processed successfully.
+    RESULT_CODE_SUCCESS = 0;
+
+    // Delayed request is dropped by a client.
+    RESULT_CODE_DROPPED = 2;
+
+    // Request processing status that indicates that currently processing is impossible because of communication issues.
+    // NOTE: Clients should not resend requests in this case, the server will restore processing with
+    // sending RESULT_CODE_SUCCESS status once communication issues are resolved.
+    // If client is not interested in this request any longer it should send REQUEST_TYPE_DROP request.
+    RESULT_CODE_DISCONNECTED = 4;
+
+    /// failure codes (100+)
+    // General failure.
+    RESULT_CODE_FAILURE = 101;
+
+    // The user is not allowed to access this instrument data.
+    RESULT_CODE_ACCESS_DENIED = 103;
+
+    // Requested information is not found.
+    RESULT_CODE_NOT_FOUND = 104;
+
+    // Requested data is outside of allowed range.
+    RESULT_CODE_OUTSIDE_ALLOWED_RANGE = 105;
+
+    // The limit of the active historical requests has been violated.
+    RESULT_CODE_ACTIVE_REQUESTS_LIMIT_VIOLATION = 106;
+
+    // The request rate limit has been violated.
+    RESULT_CODE_REQUEST_RATE_LIMIT_VIOLATION = 107;
+
+    // T&S request is not supported for specified contract.
+    RESULT_CODE_NOT_SUPPORTED = 110;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 2;
+
+  // List of the requested Time and Sales as quotes.
+  // Note that in order to simplify linking of T&S with real time quotes by a client server will atomically include
+  // all quotes with the same time-stamp into T&S without splitting the group.
+  repeated market_data_2.Quote quotes = 3;
+
+  // List of corrections.
+  repeated market_data_2.Quote corrections = 10;
+
+  // Time up to which the quotes were included into this report,
+  // if there were several with the same time-stamp equal to this time then all are included into the report (UTC).
+  // This time is set only for 'up-to-current' requests.
+  optional int64 up_to_utc_time = 4;
+
+  // True means that requested data is complete at the moment,
+  // false means more report messages are expected for completeness.
+  optional bool is_report_complete = 5 [default = true];
+
+  // Optional failure details.
+  optional string text_message = 6 [deprecated = true];
+
+  // Optional failure details.
+  optional shared_1.Text details = 11;
+
+  // Request contains dates partially outside of allowed historical data depth.
+  optional bool truncated = 7;
+
+  // Off Market trade quotes are included.
+  // Always False if user didn't request Off Market trades.
+  optional bool off_market_trades_included = 8;
+
+  // Trade attributes are included.
+  // Always False if user didn't request trade attributes.
+  optional bool trade_attributes_included = 9;
+}
+
+// Continuation parameters for TimeBarRequest.
+message ContinuationParameters
+{
+  enum ContinuationType
+  {
+    // Rollover with trading activity (corresponds with ContractMetadata.is_most_active).
+    CONTINUATION_TYPE_ACTIVE = 1;
+
+    // Rollover at expiration (non-Delayed and non-EOD contracts only).
+    CONTINUATION_TYPE_STANDARD = 2;
+  }
+
+  // This field is associated with ContinuationType enum type.
+  required uint32 continuation_type = 1;
+
+  // Equalize closes (opens for bonds). Supported for CONTINUATION_TYPE_ACTIVE continuation only.
+  optional bool equalize = 2 [default = false];
+}
+
+// Bar building tick type enumeration.
+enum BarBuildingTickType
+{
+  // Bid.
+  BAR_BUILDING_TICK_TYPE_BID = 1;
+
+  // Ask.
+  BAR_BUILDING_TICK_TYPE_ASK = 2;
+
+  // Trade.
+  BAR_BUILDING_TICK_TYPE_TRADE = 3;
+
+  // Settlement.
+  BAR_BUILDING_TICK_TYPE_SETTLEMENT = 4;
+}
+
+// Parameters of a time bar request.
+message TimeBarParameters
+{
+  // Contract id for a bar request.
+  required uint32 contract_id = 1;
+
+  // Bar unit type.
+  enum BarUnit
+  {
+    /// Multi-day bars (3 year history limit).
+
+    // yearly bars.
+    BAR_UNIT_YEAR = 1;
+
+    // semi-annual bars.
+    BAR_UNIT_SEMI_ANNUAL = 2;
+
+    // quarterly bars.
+    BAR_UNIT_QUARTER = 3;
+
+    // monthly bars.
+    BAR_UNIT_MONTH = 4;
+
+    // weekly bars.
+    BAR_UNIT_WEEK = 5;
+
+    // daily bars.
+    BAR_UNIT_DAY = 6;
+
+    /// Intra-day bars (3 month history limit).
+
+    // hourly bars.
+    BAR_UNIT_HOUR = 7;
+
+    // minute bars.
+    BAR_UNIT_MIN = 8;
+  }
+
+  // This field is associated with BarUnit enum type.
+  required uint32 bar_unit = 2;
+
+  // Number of units per a single bar for Intra-day bars (must be within 24 hours period).
+  optional uint32 unit_number = 3;
+
+  // Bars period time to start from.
+  required sint64 from_utc_time = 4;
+
+  // Optional bars period finish time.
+  // Latest allowed and available time is used if it is not specified.
+  optional sint64 to_utc_time = 5;
+
+  // Defines content of the close_price and settlement_price fields in TimeBar.
+  // close_price is set to last price if the use_settlements is false or omitted, settlement_price is omitted.
+  // settlement_price is set to trade date's settlement price
+  // (or omitted for today's bar,if contract did not yet settle)
+  // if the use_settlements is true, close_price is omitted.
+  // Note: can be 'true' for requests with bar_unit equal only to BAR_UNIT_DAY, otherwise request is rejected.
+  optional bool use_settlements = 6;
+
+  // Continuation parameters.
+  optional ContinuationParameters continuation_parameters = 7;
+
+  // List of tick types to be used in bar building.
+  // This field is associated with BarBuildingTickType enum type.
+  // When list is empty, commodity default tick types are used.
+  // Note: can be non-empty for intra-day bar requests only, otherwise request is rejected.
+  // Note: BAR_BUILDING_TICK_TYPE_SETTLEMENT tick type can only be used in combination with other type(s),
+  // otherwise request is rejected.
+  repeated uint32 tick_types = 8;
+}
+
+// Request for time bars with optional subscription.
+// In case of subscription updates are sent when a bar opens, closes or when it is corrected.
+// Corrected bars are sent even if they are outside of requested time bounds.
+// Range can be expanded with another request if needed.
+// Bar also is updated upon expiration the update interval
+// (1 second for Intra-day bars or 1 minute for Inter-day bars), if changed.
+message TimeBarRequest
+{
+  // request or subscription ID.
+  required uint32 request_id = 1;
+
+  // parameters of a request, ignored for a REQUEST_TYPE_DROP operation.
+  optional TimeBarParameters time_bar_parameters = 2;
+
+  // Type of a bar request.
+  enum RequestType
+  {
+    // Request bars without subscription.
+    REQUEST_TYPE_GET = 1;
+
+    // Request bars with subscription for updates.
+    // Note: to_utc_time parameter must not be specified to subscribe.
+    REQUEST_TYPE_SUBSCRIBE = 2;
+
+    // Drop request if server has not completed it yet and/or unsubscribe if already subscribed for updates.
+    REQUEST_TYPE_DROP = 3;
+  }
+
+  // This field is associated with RequestType enum type. REQUEST_TYPE_GET operation is processed by default.
+  optional uint32 request_type = 3;
+}
+
+// Continuation segment.
+message ContinuationSegment
+{
+  // Symbol in CQG dialect for the continuation segment
+  // populated regardless of the client dialect used.
+  optional string cqg_symbol = 1;
+}
+
+// Time bar.
+message TimeBar
+{
+  // Bar start time (UTC).
+  required sint64 bar_utc_time = 1;
+
+  // Open price.
+  optional sint32 scaled_open_price = 2;
+
+  // High price.
+  optional sint32 scaled_high_price = 3;
+
+  // Low price.
+  optional sint32 scaled_low_price = 4;
+
+  // Close or last price (if the bar is not closed yet).
+  // It is omitted if the TimeBarParameters.use_settlements is true.
+  optional sint32 scaled_close_price = 5;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 6 [deprecated = true];
+
+  // Bar volume.
+  optional cqg.Decimal volume = 15;
+
+  // Trade date (in time format), it is set only for the first bar in a requested period
+  // and for each first bar of the following trade dates for intra-day bars.
+  // Trade date of the bar first day for multi-day bars.
+  optional sint64 trade_date = 7;
+
+  // Note: use 'commodity_volume' instead.
+  optional uint64 scaled_commodity_volume = 8 [deprecated = true];
+
+  // Commodity volume where available, for multi-day bars only.
+  optional cqg.Decimal commodity_volume = 16;
+
+  // Note: use 'open_interest' instead.
+  optional uint64 scaled_open_interest = 9 [deprecated = true];
+
+  // Open interest, for multi-day bars only.
+  optional cqg.Decimal open_interest = 17;
+
+  // Note: use 'commodity_open_interest' instead.
+  optional uint64 scaled_commodity_open_interest = 10 [deprecated = true];
+
+  // Commodity open interest, for multi-day bars only.
+  optional cqg.Decimal commodity_open_interest = 18;
+
+  // Settlement price, for daily bars only.
+  // It is omitted if the TimeBarParameters.use_settlements is false or omitted.
+  optional sint32 scaled_settlement_price = 11;
+
+  // Tick volume.
+  optional uint64 tick_volume = 12;
+
+  // Commodity tick volume where available, for multi-day bars only.
+  optional uint64 commodity_tick_volume = 13;
+
+  // Continuation segment the bar belongs to, it is set only for the first bar
+  // and for each first bar from the next continuation segment.
+  // Used only for continuation bars with BAR_UNIT_MONTH and smaller BarUnit.
+  optional ContinuationSegment continuation_segment = 14;
+}
+
+// Bar report status code enumeration.
+enum BarReportStatusCode
+{
+  /// success codes  (0 - 99)
+  // Request is processed without subscription (subscription was not requested).
+  BAR_REPORT_STATUS_CODE_SUCCESS = 0;
+
+  // Request is processed and subscription is established or restored after disconnection.
+  // Data can be resent as a result of the restored subscription.
+  BAR_REPORT_STATUS_CODE_SUBSCRIBED = 1;
+
+  // Subscription or delayed request is dropped by a client.
+  BAR_REPORT_STATUS_CODE_DROPPED = 2;
+
+  // Unsolicited information update because of subscription.
+  BAR_REPORT_STATUS_CODE_UPDATE = 3;
+
+  // Subscription or request processing status that indicates that currently processing is impossible
+  // because of communication issues.
+  // NOTE: Clients should not resubscribe or resend requests in this case, the server will restore processing with
+  // sending BAR_REPORT_STATUS_CODE_SUCCESS or BAR_REPORT_STATUS_CODE_SUBSCRIBED status
+  // once communication issues are resolved.
+  // If client is not interested in this request or subscription any longer it should send REQUEST_TYPE_DROP request.
+  BAR_REPORT_STATUS_CODE_DISCONNECTED = 4;
+
+  // Bars are invalidated for specified time range due to data correction.
+  // Re-request historical bars and/or re-subscribe to bar updates to receive valid bar data.
+  // NOTE: Subscription is not dropped.
+  BAR_REPORT_STATUS_CODE_INVALIDATED = 5;
+
+  /// failure codes (100+), subscription (if any) is dropped in case of failure.
+  // General failure.
+  BAR_REPORT_STATUS_CODE_FAILURE = 101;
+
+  // The user is not allowed to access this data.
+  BAR_REPORT_STATUS_CODE_ACCESS_DENIED = 103;
+
+  // Requested information is not found.
+  BAR_REPORT_STATUS_CODE_NOT_FOUND = 104;
+
+  // Requested data is outside of allowed range.
+  BAR_REPORT_STATUS_CODE_OUTSIDE_ALLOWED_RANGE = 105;
+
+  // Parameters of a bar request are invalid.
+  BAR_REPORT_STATUS_CODE_INVALID_PARAMS = 106;
+
+  // The limit of active requests has been violated.
+  BAR_REPORT_STATUS_CODE_ACTIVE_REQUESTS_LIMIT_VIOLATION = 107;
+
+  // The limit of simultaneous historical subscriptions has been violated.
+  BAR_REPORT_STATUS_CODE_SUBSCRIPTION_LIMIT_VIOLATION = 108;
+
+  // The request rate limit has been violated.
+  BAR_REPORT_STATUS_CODE_REQUEST_RATE_LIMIT_VIOLATION = 109;
+
+  // Bar request without subscription on updates is not supported for specified contract.
+  BAR_REPORT_STATUS_CODE_NOT_SUPPORTED = 110;
+}
+
+// Time bar data response or update.
+// Each report contains set of bars sorted in descending order by bar_utc_time.
+// Reports related to a specific request ordered chronologically from the most recent one to the past.
+// Warning: bar updates are not synchronized with real time data so a real time quote that is included into
+// a bar might be received either before or after the bar update,
+// use time of a quote for possible real-time bar updates.
+message TimeBarReport
+{
+  // ID of a corresponding request or subscription.
+  required uint32 request_id = 1;
+
+  // This field is associated with BarReportStatusCode enum type.
+  required uint32 status_code = 2;
+
+  // List of time bars.
+  repeated TimeBar time_bars = 3;
+
+  // Time up to which the quotes were included into bars,
+  // if there were several with the same time-stamp equal to this time then all are included into the last bar (UTC).
+  // This time is set for 'up-to-current' bar requests and only if report contains current (incomplete) bar.
+  optional int64 up_to_utc_time = 4;
+
+  // True means that requested data is complete at the moment,
+  // false means more report messages are expected for completeness.
+  optional bool is_report_complete = 5 [default = true];
+
+  // Optional failure details.
+  optional string text_message = 6 [deprecated = true];
+
+  // Request contains dates partially outside of allowed historical data depth.
+  optional bool truncated = 7;
+
+  // Optional failure details.
+  optional shared_1.Text details = 8;
+}
+
+// Range of bars.
+message BarRange
+{
+  // Boundary time of the requested range (see enum TimeDirection for the details).
+  optional sint64 utc_time = 1;
+
+  // Number of requested bars.
+  // Note: The maximal number of bars that can be requested in one message is limited, 100000 by default.
+  required uint32 count = 2;
+
+  // Boundary index of the requested range (see enum TimeDirection for the details).
+  optional sint32 index = 3;
+
+  // Time direction.
+  enum TimeDirection
+  {
+    // 'utc_time' and 'index' define the right bound of the requested range.
+    // If 'utc_time' is not specified then latest allowed and available time is used.
+    // The right bound is exclusive: the report will contain specified count of bars preceding the boundary.
+    // Each report will contain set of bars sorted in descending order by (bar_utc_time, index).
+    // Reports related to a specific request will be ordered chronologically from the most recent one to the past.
+    TIME_DIRECTION_BACKWARD = 1;
+  }
+
+  // This field is associated with TimeDirection enum type.
+  // TIME_DIRECTION_BACKWARD is used by default.
+  optional uint32 time_direction = 4;
+}
+
+// Request for non-time based bars with optional subscription (3 month history limit).
+message NonTimedBarRequest
+{
+  // Request ID.
+  required uint32 request_id = 1;
+
+  // Type of request action.
+  enum RequestType
+  {
+    // Request bars without subscription.
+    REQUEST_TYPE_GET = 1;
+
+    // Request bars with subscription for updates.
+    // Note: utc_time parameter of BarRange must not be specified to subscribe.
+    REQUEST_TYPE_SUBSCRIBE = 2;
+
+    // Drop request if server has not completed it yet and/or unsubscribe if already subscribed for updates.
+    REQUEST_TYPE_DROP = 3;
+  }
+
+  // This field is associated with RequestType enum type.
+  // REQUEST_TYPE_GET operation is processed by default.
+  optional uint32 request_type = 2;
+
+  // Continuation parameters.
+  optional ContinuationParameters continuation_parameters = 3;
+
+  // Contract id.
+  // Note: must be specified for REQUEST_TYPE_GET or REQUEST_TYPE_SUBSCRIBE types of request.
+  optional uint32 contract_id = 4;
+
+  // Specifies bar range of a request.
+  // Note: must be specified for REQUEST_TYPE_GET or REQUEST_TYPE_SUBSCRIBE types of request.
+  optional BarRange bar_range = 5;
+
+  // List of tick types to be used in bar building.
+  // This field is associated with BarBuildingTickType enum type.
+  // When list is empty, commodity default tick types are used.
+  // Note: Requests with BAR_BUILDING_TICK_TYPE_SETTLEMENT tick type in a list are rejected.
+  repeated uint32 tick_types = 10;
+
+  /// Only one of following optional fields has to be specified.
+  // Constant volume bar request parameters.
+  optional ConstantVolumeBarParameters constant_volume_bar_parameters = 6;
+
+  // P&F request parameters.
+  optional PointAndFigureParameters point_and_figure_parameters = 7;
+
+  // Renko bar request parameters.
+  optional RenkoBarParameters renko_bar_parameters = 8;
+
+  // Range bar request parameters.
+  optional RangeBarParameters range_bar_parameters = 9;
+
+  // Tick bar request parameters.
+  optional TickBarParameters tick_bar_parameters = 11;
+}
+
+// Parameters of a Renko bar request.
+message RenkoBarParameters
+{
+  // Size of single brick. Can take a value from 1 to 1000000000.
+  required uint32 brick_size = 1;
+
+  // Maximum number of null bricks that can be generated as a single brick in the case of price gaps.
+  // Can take a value from 0 to 200. Default values is 0.
+  optional uint32 max_null_bricks = 2;
+}
+
+// Parameters of a Range bar request.
+message RangeBarParameters
+{
+  // Size of single range bar. Can take a value from 1 to 1000000000.
+  required uint32 range_size = 1;
+
+  // Maximum number of null range bars that can be generated as a single range bar in the case of price gaps.
+  // Can take a value from 0 to 200. Default values is 0.
+  optional uint32 max_null_bars = 2;
+}
+
+// Parameters of a Tick bar request.
+message TickBarParameters
+{
+  // Use 0-plus and 0-minus ticks when building bars.
+  optional bool use_flat_ticks = 1;
+}
+
+// Non-time based bar data response or update.
+// Each report contains set of bars. The order of bars depends on BarRange.time_direction specified in the request.
+// The order of reports related to a specific request depends on BarRange.time_direction specified in the request.
+message NonTimedBarReport
+{
+  // ID of the request.
+  required uint32 request_id = 1;
+
+  // This field is associated with BarReportStatusCode enum type.
+  required uint32 status_code = 2;
+
+  // Optional failure details.
+  optional shared_1.Text details = 3;
+
+  // Time from which bars are invalidated.
+  optional sint64 invalidated_from_utc_time = 4;
+
+  // Time up to which bars are invalidated.
+  // If 'invalidated_from_utc_time' is set and 'invalidated_to_utc_time' isn't set, then bars are invalidated
+  // up to current time. In this case, bar updates stopped for this subscription.
+  optional sint64 invalidated_to_utc_time = 5;
+
+  // Time up to which the quotes were included into bars,
+  // if there were several with the same time-stamp equal to this time
+  // then all are included into the report (UTC).
+  // This time is set only for requests with unspecified 'utc_time' parameter of message BarRange and only if report
+  // contains current (incomplete) bar.
+  optional int64 up_to_utc_time = 6;
+
+  // It is set only if the number of requested bars exceeded limit.
+  optional bool truncated_by_bar_count = 7;
+
+  // True means that requested data is complete at the moment,
+  // false means more report messages are expected for completeness.
+  optional bool is_report_complete = 8 [default = true];
+
+  /// Only one of the following repeated fields is specified.
+  // Constant volume bars.
+  repeated ConstantVolumeBar constant_volume_bars = 9;
+
+  // Point and figure bars.
+  repeated PointAndFigureBar point_and_figure_bars = 10;
+
+  // Renko bars.
+  repeated RenkoBar renko_bars = 11;
+
+  // Range bars.
+  repeated RangeBar range_bars = 12;
+
+  // Tick bars.
+  repeated TickBar tick_bars = 13;
+}
+
+// Parameters of a Constant Volume Bar request.
+message ConstantVolumeBarParameters
+{
+  // Note: use volume_level instead.
+  optional uint32 obsolete_volume_level = 1 [deprecated = true];
+
+  // Volume covered by each bar. Cannot be less than ContractMetadata's trade_size_increment 
+  // and higher than trade_size_increment*1000000000.
+  optional cqg.Decimal volume_level = 4;
+
+  // Determines volume type. If false (default value) then bars are built based on exchange volume,
+  // otherwise they are built based on ticks (number of inside price changes).
+  // Note: if use_tick_volume is true, volume_level is rounded down.
+  // Note: WebAPI server rejects requests for contracts without actual volume data (
+  //       ContractMetadata.has_exchange_volume=False).
+  optional bool use_tick_volume = 2;
+
+  // Use 0-plus and 0-minus ticks when building bars.
+  // Note: applicable only to tick volume.
+  optional bool use_flat_ticks = 3;
+}
+
+// Parameters of a Point and Figure request.
+message PointAndFigureParameters
+{
+  // Specifies the number of tick units represented by each P&F. Can take a value from 1 to 1000.
+  required uint32 box_size = 1;
+
+  // Specifies the number of boxes for P&F direction reversal. Can take a value from 1 to 1000.
+  required uint32 reversal = 2;
+}
+
+// Constant Volume Bar.
+message ConstantVolumeBar
+{
+  // Bar start time (UTC), it is set only for the first bar of the following bar start times.
+  optional sint64 bar_utc_time = 1;
+
+  // Bar index. Different bars with the same bar_utc_time always have different indexes.
+  // Greater index means later bar.
+  // It is set only if non-zero.
+  optional sint32 index = 2;
+
+  // Trade date (in time format), it is set only for the first bar of the following trade dates.
+  optional sint64 trade_date = 3;
+
+  // Open price.
+  optional sint64 scaled_open_price = 4;
+
+  // High price.
+  optional sint64 scaled_high_price = 5;
+
+  // Low price.
+  optional sint64 scaled_low_price = 6;
+
+  // Close or last price (if the bar is not closed yet).
+  optional sint64 scaled_close_price = 7;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 8 [deprecated = true];
+
+  // Exchange volume.
+  optional cqg.Decimal volume = 11;
+
+  // Tick volume.
+  optional uint64 tick_volume = 9;
+
+  // Continuation segment the bar belongs to, it is set only for the first bar
+  // and for each first bar from the next continuation segment.
+  optional ContinuationSegment continuation_segment = 10;
+}
+
+// Point and Figure bar.
+message PointAndFigureBar
+{
+  // Bar start time (UTC), it is set only for the first bar of the following bar start times.
+  optional sint64 bar_utc_time = 1;
+
+  // Bar index. Different bars with the same bar_utc_time always have different indexes.
+  // Greater index means later bar.
+  // It is set only if non-zero.
+  optional sint32 index = 2;
+
+  // Trade date (in time format), it is set only for the first bar of the following trade dates.
+  optional sint64 trade_date = 3;
+
+  // Open price.
+  optional sint64 pf_scaled_open_price = 4;
+
+  // High price (rounded to PF box).
+  optional sint64 pf_scaled_high_price = 5;
+
+  // Low price (rounded to PF box).
+  optional sint64 pf_scaled_low_price = 6;
+
+  // Close price.
+  optional sint64 pf_scaled_close_price = 7;
+
+  // High price (not rounded to PF box).
+  optional sint64 scaled_high_price = 8;
+
+  // Low price (not rounded to PF box).
+  optional sint64 scaled_low_price = 9;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 10 [deprecated = true];
+
+  // Exchange volume.
+  optional cqg.Decimal volume = 14;
+
+  // Tick volume.
+  optional uint64 tick_volume = 11;
+
+  // True if the P&F chart is plotting an X, False if the P&F chart is plotting an O.
+  optional bool up = 12;
+
+  // Continuation segment the bar belongs to, it is set only for the first bar
+  // and for each first bar from the next continuation segment.
+  optional ContinuationSegment continuation_segment = 13;
+}
+
+// Renko bar.
+message RenkoBar
+{
+  // Bar start time (UTC), it is set only for the first bar of the following bar start times.
+  optional sint64 bar_utc_time = 1;
+
+  // Bar index. Different bars with the same bar_utc_time always have different indexes.
+  // Greater index means later bar.
+  // It is set only if non-zero.
+  optional sint32 index = 2;
+
+  // Trade date (in time format), it is set only for the first bar of the following trade dates.
+  optional sint64 trade_date = 3;
+
+  // Open price.
+  optional sint64 scaled_open_price = 4;
+
+  // High price.
+  optional sint64 scaled_high_price = 5;
+
+  // Low price.
+  optional sint64 scaled_low_price = 6;
+
+  // Close or last price (if the bar is not closed yet).
+  optional sint64 scaled_close_price = 7;
+
+  // Maximum of open and close prices.
+  optional sint64 scaled_renko_high_price = 8;
+
+  // Minimum of open and close prices.
+  optional sint64 scaled_renko_low_price = 9;
+
+  // Defines how renko bar is going to be closed (up or down).
+  optional bool up = 10;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 11 [deprecated = true];
+
+  // Exchange volume.
+  optional cqg.Decimal volume = 15;
+
+  // Tick volume.
+  optional uint64 tick_volume = 12;
+
+  // If this bar is the first bar of a session.
+  optional bool first_bar_of_session = 13;
+
+  // Continuation segment the bar belongs to, it is set only for the first bar
+  // and for each first bar from the next continuation segment.
+  optional ContinuationSegment continuation_segment = 14;
+}
+
+// Range bar.
+message RangeBar
+{
+  // Bar start time (UTC), it is set only for the first bar of the following bar start times.
+  optional sint64 bar_utc_time = 1;
+
+  // Bar index. Different bars with the same bar_utc_time always have different indexes.
+  // Greater index means later bar.
+  // It is set only if non-zero.
+  optional sint32 index = 2;
+
+  // Trade date (in time format), it is set only for the first bar of the following trade dates.
+  optional sint64 trade_date = 3;
+
+  // Open price.
+  optional sint64 scaled_open_price = 4;
+
+  // High price.
+  optional sint64 scaled_high_price = 5;
+
+  // Low price.
+  optional sint64 scaled_low_price = 6;
+
+  // Close or last price (if the bar is not closed yet).
+  optional sint64 scaled_close_price = 7;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 8 [deprecated = true];
+
+  // Exchange volume.
+  optional cqg.Decimal volume = 11;
+
+  // Tick volume.
+  optional uint64 tick_volume = 9;
+
+  // Continuation segment the bar belongs to, it is set only for the first bar
+  // and for each first bar from the next continuation segment.
+  optional ContinuationSegment continuation_segment = 10;
+}
+
+// Tick bar.
+message TickBar
+{
+  // Bar start time (UTC), it is set only for the first bar of the following bar start times.
+  optional sint64 bar_utc_time = 1;
+
+  // Bar index. Different bars with the same bar_utc_time always have different indexes.
+  // Greater index means later bar.
+  // It is set only if non-zero.
+  optional sint32 index = 2;
+
+  // Trade date (in time format), it is set only for the first bar of the following trade dates.
+  optional sint64 trade_date = 3;
+
+  // Close price.
+  optional sint64 scaled_close_price = 4;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 5 [deprecated = true];
+
+  // Exchange volume.
+  optional cqg.Decimal volume = 7;
+
+  // Continuation segment the bar belongs to, it is set only for the first bar
+  // and for each first bar from the next continuation segment.
+  optional ContinuationSegment continuation_segment = 6;
+}
+
+// VolumeProfile request, 3 month history limit.
+message VolumeProfileRequest
+{
+  // request ID.
+  required uint32 request_id = 1;
+
+  // Request parameters.
+  optional VolumeProfileParameters volume_profile_parameters = 2;
+
+  // Type of request action.
+  enum RequestType
+  {
+    // Request data.
+    REQUEST_TYPE_GET = 1;
+
+    // Cancel a previously issued request.
+    REQUEST_TYPE_DROP = 3;
+  }
+
+  // This field is associated with RequestType enum type.
+  // REQUEST_TYPE_GET operation is processed by default.
+  optional uint32 request_type = 3;
+}
+
+// Parameters of a Volume Profile request.
+message VolumeProfileParameters
+{
+  // Contract id for the volume profile request.
+  required uint32 contract_id = 1;
+
+  // Both of the next two fields have to be set, otherwise the request will return a failure
+  // Start of the time range for volume profile to be calculated for.
+  optional sint64 start_utc_time = 2;
+
+  // Exclusive end of the time range for volume profile to be calculated for.
+  optional sint64 end_utc_time = 3;
+}
+
+// VolumeProfile snapshot response.
+message VolumeProfileReport
+{
+  // ID of the volume profile request.
+  required uint32 request_id = 1;
+
+  enum ResultCode
+  {
+    /// success codes  (0 - 99)
+    // Request is processed successfully.
+    RESULT_CODE_SUCCESS = 0;
+
+    // Delayed request is dropped by a client.
+    RESULT_CODE_DROPPED = 2;
+
+    // Request processing status that indicates that currently
+    // processing is impossible because of communication issues.
+    // NOTE: Clients should not resend requests in this case,
+    // the server will restore processing with sending RESULT_CODE_SUCCESS status
+    // once communication issues are resolved. If client is not interested
+    // in this request any longer it should send REQUEST_TYPE_DROP request.
+    RESULT_CODE_DISCONNECTED = 4;
+
+    /// failure codes (100+)
+    // General failure.
+    RESULT_CODE_FAILURE = 101;
+
+    // The user is not allowed to access this instrument data.
+    RESULT_CODE_ACCESS_DENIED = 103;
+
+    // Requested information is not found.
+    RESULT_CODE_NOT_FOUND = 104;
+
+    // Requested data is outside of allowed range.
+    RESULT_CODE_OUTSIDE_ALLOWED_RANGE = 105;
+
+    // The limit of the active historical requests has been violated.
+    RESULT_CODE_ACTIVE_REQUESTS_LIMIT_VIOLATION = 106;
+
+    // VolumeProfile request is not supported for specified contract.
+    RESULT_CODE_NOT_SUPPORTED = 110;
+  }
+
+  // This field is associated with ResultCode enum type.
+  required uint32 result_code = 2;
+
+  // Volume profile snapshot items.
+  repeated VolumeProfileItem volume_profile_items = 3;
+
+  // Volume profile cumulative statistics for the last quotes.
+  // This field is filled only for the first chunk of the report.
+  optional VolumeProfileLastQuotesCumulativeStatistics last_quotes_cumulative_statistics = 8;
+
+  // Time up to which the quotes were included into this report,
+  // if there were several with the same time-stamp equal to this time
+  // then all are included into the report (UTC).
+  // This time is set only for requests with unspecified 'end_utc_time' parameter
+  // of message VolumeProfileParameters.
+  optional int64 up_to_utc_time = 4;
+
+  // Optional failure details.
+  optional string text_message = 5 [deprecated = true];
+
+  // Optional failure details.
+  optional shared_1.Text details = 9;
+
+  // Request contains dates partially outside of allowed historical data depth.
+  optional bool truncated = 6;
+
+  // True means that requested data is complete at the moment,
+  // false means more report messages are expected for completeness.
+  optional bool is_report_complete = 7 [default = true];
+}
+
+// Volume profile cumulative statistics for the last quotes.
+message VolumeProfileLastQuotesCumulativeStatistics
+{
+  // Price of the last best ask quote within Volume Profile range.
+  optional sint32 scaled_last_ask_price = 1;
+
+  // Price of the last best bid quote within Volume Profile range.
+  optional sint32 scaled_last_bid_price = 2;
+
+  // Note: use ask_trade_volume instead.
+  optional double scaled_ask_trade_volume = 3 [deprecated = true];
+
+  // Cumulative sum of trade volumes on ask side since the last best bid or best ask price update
+  // within Volume Profile range.
+  optional double ask_trade_volume = 5;
+
+  // Note: use bid_trade_volume instead.
+  optional double scaled_bid_trade_volume = 4 [deprecated = true];
+
+  // Cumulative sum of trade volumes on bid side since the last best bid or best ask price update
+  // within Volume Profile range.
+  optional double bid_trade_volume = 6;
+}
+
+// Volume profile snapshot item.
+message VolumeProfileItem
+{
+  // Price (unique for each volume profile snapshot reported).
+  required sint32 scaled_price = 1;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 2 [deprecated = true];
+
+  // Total volume of all trades with this price for the time range asked.
+  optional cqg.Decimal volume = 3;
+}

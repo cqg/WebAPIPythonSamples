@@ -1,0 +1,982 @@
+// Market Data messaging
+
+syntax = "proto2";
+
+package market_data_2;
+
+import "common/decimal.proto";
+import "common/shared_1.proto";
+import "google/protobuf/timestamp.proto";
+
+// Subscription to market data.
+// If it is necessary to change subscription level client should send a new subscription request
+// with the same contract ID but a new subscription level.
+message MarketDataSubscription
+{
+  // Level or subscription.
+  enum Level
+  {
+    // Unsubscribe.
+    LEVEL_NONE = 0;
+
+    // Get only settlement quotes.
+    // NOTE: MarketValues will contain only settlements.
+    LEVEL_SETTLEMENTS = 5;
+
+    // Get only market values.
+    // NOTE: Array of quotes, requests for quotation, corrections, detailed DOM,
+    // market state in RealTimeMarketData message will be always empty.
+    // Supported only for contracts with filled field ContractMetadata::end_of_day_delay.
+    LEVEL_END_OF_DAY = 6;
+
+    // Get trade and settlement quotes.
+    LEVEL_TRADES = 1;
+
+    // Get trades, settlement and best ask & bid without volumes.
+    LEVEL_TRADES_BBA = 2;
+
+    // Get trades, settlement and best ask & bid with volumes.
+    LEVEL_TRADES_BBA_VOLUMES = 3;
+
+    // All price data including DOM.
+    LEVEL_TRADES_BBA_DOM = 4;
+
+    // LEVEL_TRADES_BBA_DOM + Order Details.
+    LEVEL_TRADES_BBA_DETAILED_DOM = 7;
+  }
+
+  // Contract ID to subscribe (see symbol resolution report).
+  // This is client's responsibility to re-subscribe in case of symbol resolution update.
+  required uint32 contract_id = 1;
+
+  // Subscription request id. Should be unique among currently processed requests.
+  // It is required field.
+  optional uint32 request_id = 14;
+
+  // Subscription level.
+  // This field is associated with Level enum type.
+  // Result level will be available in MarketDataSubscriptionStatus.
+  required uint32 level = 2;
+
+  // Defines market values array in real-time market data snapshot.
+  // False or omitted means that snapshots will contain market values for most recent trading day only (if available).
+  // True means that snapshots may contain market values for several (up to 3) past trading days.
+  optional bool include_past_market_values = 3;
+
+  // Reserved field number (do not reuse).
+  optional sint64 reserved1 = 4;
+
+  // Defines quotes array in real-time market data snapshot.
+  // See details in commentary for field RealTimeMarketData.quotes.
+  // Note: subscription with include_past_quotes=True may take longer.
+  optional bool include_past_quotes = 5;
+
+  // [obsolete] This operation is no longer supported
+  optional bool obsolete_include_discretionary_quotes = 6 [deprecated = true];
+
+  // Defines session market values array in real-time market data snapshot.
+  // False or omitted means that snapshots will not contain session market values.
+  // True means that snapshots may contain session market values for several sessions.
+  optional bool include_session_market_values = 9;
+
+  // Specifies that quotes and market values need to include yields.
+  // Result value will be available in MarketDataSubscriptionStatus.
+  // Re-subscription with the changed value of this parameter may lead to temporary disconnection
+  // of real-time market data (STATUS_CODE_DISCONNECTED).
+  optional bool include_yields = 8;
+
+  // Defines source contract quote price in real-time market data.
+  // scaled_source_price is provided only for best ask and best bid.
+  // Other quote types either have the same values as scaled_price for the contract or not supported.
+  // Note: Flag is ignored (considered as False) if the contract does not have a source contract.
+  // Re-subscription with the changed value of this parameter may lead to temporary disconnection
+  // of real-time market data (STATUS_CODE_DISCONNECTED).
+  optional bool include_source_prices = 10;
+
+  // Whether need to include RFQ in real-time market data. By default server don't provide them.
+  // Result value will be available in MarketDataSubscriptionStatus.
+  optional bool include_requests_for_quotation = 11;
+
+  // Specifies that quotes need to include trade attributes.
+  optional bool include_trade_attributes = 12;
+
+  // Specifies to include market state in real-time market data.
+  optional bool include_market_state = 13;
+
+  // Specifies to include Off Market trade quotes in real-time market data.
+  optional bool include_off_market_trades = 15;
+
+  // Optional OTC contributor ID for contributor specific data subscriptions.
+  optional string contributor_id = 7;
+
+  // Specifies that quotes and market values need to include currency prices used for price conversion.
+  // Note: Flag is ignored (considered as False) if the contract does not have a source contract.
+  // Re-subscription with the changed value of this parameter may lead to temporary disconnection
+  // of real-time market data (STATUS_CODE_DISCONNECTED).
+  optional bool include_currency_rate = 16;
+
+  // Reserved for internal use.
+  extensions 100 to 149;
+}
+
+// Subscription status
+message MarketDataSubscriptionStatus
+{
+  enum StatusCode
+  {
+    /// success codes (0 - 99)
+    STATUS_CODE_SUCCESS = 0;
+
+    // Currently subscription is disconnected.
+    // Possible reasons: communication issues, metadata update, subscription parameters change.
+    // NOTE: Clients should not resubscribe in this case, the server will restore subscription with
+    // sending STATUS_CODE_SUCCESS status. If subscription can't be restored for some reason
+    // one of the failure codes will be sent.
+    STATUS_CODE_DISCONNECTED = 1;
+
+    /// failure codes (100+)
+    // General failure.
+    STATUS_CODE_FAILURE = 101;
+
+    // Subscription parameters are invalid.
+    STATUS_CODE_INVALID_PARAMS = 102;
+
+    // The user is not allowed to be subscribed to this Instrument.
+    STATUS_CODE_ACCESS_DENIED = 103;
+
+    // Market data source was deleted because of expiration or by another reason.
+    STATUS_CODE_DELETED = 104;
+
+    // The subscription count limit has been violated.
+    STATUS_CODE_SUBSCRIPTION_LIMIT_VIOLATION = 105;
+
+    // OTC Contributor ID is required for this subscription but was not provided or not authorized.
+    STATUS_CODE_CONTRIBUTOR_REQUIRED = 106;
+
+    // The subscription rate limit has been violated.
+    STATUS_CODE_SUBSCRIPTION_RATE_LIMIT_VIOLATION = 107;
+
+    // Market data subscription is not supported for specified contract.
+    STATUS_CODE_NOT_SUPPORTED = 110;
+  }
+
+  // Subscription contract ID.
+  required uint32 contract_id = 1;
+
+  // Subscription result.
+  // This field is associated with StatusCode enum type.
+  required uint32 status_code = 2;
+
+  // Effective subscription level.
+  // This field is associated with MarketDataSubscription.Level enum type.
+  // Note: when successfully subscribed to delayed DOM data, the reported level is LEVEL_TRADES_BBA_DOM,
+  // but actual DOM data may not yet be available and will be available later.
+  // Level can be decreased if the client is prohibited to get requested data.
+  required uint32 level = 3;
+
+  // Possible details of subscription failure.
+  optional string text_message = 4 [deprecated = true];
+
+  // Possible details of subscription failure.
+  optional shared_1.Text details = 18;
+
+  // Reserved field number (do not reuse).
+  optional sint64 reserved1 = 5;
+
+  // Specifies whether past quotes are included into real-time market data snapshot or not.
+  // Always False if user didn't request past quotes.
+  optional bool past_quotes_included = 6;
+
+  //[obsolete] This operation is no longer supported.
+  optional bool obsolete_discretionary_quotes_included = 7 [deprecated = true];
+
+  // Specifies whether intraday session market values are included into real-time market data or not.
+  optional bool session_market_values_included = 10;
+
+  // Specifies whether yields are included into real-time market data or not.
+  optional bool yields_included = 9;
+
+  // Specifies whether source contract prices are include into real-time market data or not.
+  // Always False if user didn't request source contract quotes.
+  optional bool source_price_included = 11;
+
+  // Specifies whether RFQs are included into real-time market data or not.
+  // Always False if user didn't request RFQs.
+  optional bool requests_for_quotation_included = 12;
+
+  // Specifies whether trade attributes included into real-time market data.
+  // Always False if user didn't request trade attributes.
+  optional bool trade_attributes_included = 13;
+
+  // Specifies whether market state included into real-time market data.
+  // Always False if user didn't request market state.
+  optional bool market_state_included = 14;
+
+  // Specifies whether Off Market trade quotes included into real-time market data.
+  // Always False if user didn't request Off Market trades.
+  optional bool off_market_trades_included = 16;
+
+  // Specifies whether currency prices are included into real-time market data.
+  // Always False if user did not request currency prices or contract does not use currency conversion.
+  optional bool currency_rate_included = 17;
+
+  // Request ID of a corresponding request.
+  optional uint32 request_id = 15;
+
+  // OTC contributor ID for contributor specific data subscriptions.
+  optional string contributor_id = 8;
+
+  // Reserved for internal use.
+  extensions 100 to 149;
+}
+
+// Real time data delivery.
+// Snapshot is sent as the first message after subscription and may appear periodically when subscribed.
+message RealTimeMarketData
+{
+  // Contract ID assigned by server.
+  required uint32 contract_id = 1;
+
+  // Contract quotes. DOM is updated by new volumes per price. Zero volume is used to clean this price record from DOM.
+  // Snapshot quotes have no indicators and no trade attributes.
+  // If is_snapshot=False, contains new quotes for the contract.
+  // If is_snapshot=True, contains one last quote of each type.
+  // If MarketDataSubscription.include_past_quote=False, includes last quotes for most recent trading day
+  // or new day in pre-open.
+  // If MarketDataSubscription.include_past_quote=True, includes last quotes for last N trading days
+  // or new day in pre-open. N by default equals to 7 and can't be changed by client. Contact customer support
+  // if you want to increase this value.
+  // If you need to get last settlement, prefer to use message MarketValues because it contains trade_date.
+  repeated Quote quotes = 2;
+
+  // Trading day the quotes belong to.
+  optional sint64 quotes_trade_date = 18;
+
+  // Contract correction quotes.
+  repeated Quote corrections = 7;
+
+  // True if this is a snapshot (all previously known quotes and Order Details for this contract should be cleaned).
+  optional bool is_snapshot = 3;
+
+  // Collapsing level that was applied by server.
+  // NONE if the field is omitted.
+  // This field is associated with RealTimeCollapsingLevel enum type.
+  optional uint32 collapsing_level = 4;
+
+  // Market values of a contract (e.g. Open/High/Low/Last) for several past trading days.
+  // Present in snapshots and in updates if some values are changed (only changed values are included in updates).
+  repeated MarketValues market_values = 5;
+
+  // Detailed DOM for LEVEL_TRADES_BBA_DETAILED_DOM subscription level.
+  optional DetailedDOM detailed_dom = 16;
+
+  // List of RFQs.
+  // Never presents in snapshots, can be provided in updates only.
+  repeated RFQ requests_for_quotation = 6;
+
+  // Specifies the current market state. Not all contracts provide such data.
+  // Received on subscription and in updates if the state is changed.
+  optional MarketState market_state = 17;
+
+  // Reserved for internal use.
+  extensions 100 to 149;
+}
+
+// Specific quote information
+message Quote
+{
+  // Type of the quote.
+  enum Type
+  {
+    // Trade quote.
+    TYPE_TRADE = 0;
+
+    // Best bid quote.
+    // Note that best bid/ask quotes are not guaranteed to be consistent with bid/ask quotes in the short
+    // term. Thus, best bid/ask quotes must not be used to update DOM.
+    TYPE_BESTBID = 1;
+
+    // Best ask quote.
+    // See the note for TYPE_BESTBID.
+    TYPE_BESTASK = 2;
+
+    // Bid quote (DOM level).
+    TYPE_BID = 3;
+
+    // Ask quote (DOM level).
+    TYPE_ASK = 4;
+
+    // Settlement quote.
+    TYPE_SETTLEMENT = 5;
+
+    // [obsolete] This quote type is no longer supported.
+    OBSOLETE_TYPE_BESTDISCRBID = 6;
+
+    // [obsolete] This quote type is no longer supported.
+    OBSOLETE_TYPE_BESTDISCRASK = 7;
+
+    // [obsolete] This quote type is no longer supported.
+    OBSOLETE_TYPE_DISCRBID = 8;
+
+    // [obsolete] This quote type is no longer supported.
+    OBSOLETE_TYPE_DISCRASK = 9;
+  }
+
+  // This field is associated with Type enum type.
+  required uint32 type = 1;
+
+  // Time of the quote (UTC).
+  // If time of first quote is not specified quote_utc_times are unknown.
+  // Settlement quotes may not have quote_utc_time(even if past_quotes_included=True).
+  // If time of snapshot quotes is required, subscribe with include_past_quotes(subscription may be slower).
+  // If MarketDataSubscriptionStatus returned with flag past_quotes_included, quotes shall contain valid quote_utc_time.
+  optional sint64 quote_utc_time = 2;
+
+  // Quote price.
+  required sint32 scaled_price = 3;
+
+  // Source contract quote price. See MarketDataSubscription.include_source_prices.
+  // correct_price_scale from source contract metadata should be used to convert scaled_source_price.
+  optional sint32 scaled_source_price = 8;
+
+  // Yield
+  // Included if subscribed and the contract support yields.
+  optional double price_yield = 6;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 4 [deprecated = true];
+
+  // Quote volume (included for BBA only if volume is subscribed).
+  // Zero volume for a bid or ask indicates it has been cleared.  It can be a best price and a part of DOM update.
+  optional cqg.Decimal volume = 11;
+
+  // Optional indicator(s) (e.g. this quote also updates some of Open/High/Low/Last session prices).
+  enum Indicator
+  {
+    // Price of this quote is a new open price of the contract session.
+    INDICATOR_OPEN = 1;
+
+    // Price of this quote is a new high price of the contract session.
+    INDICATOR_HIGH = 2;
+
+    // Price of this quote is a new low price of the contract session.
+    INDICATOR_LOW = 3;
+
+    // Price of this quote is a new last price of the contract session.
+    INDICATOR_LAST = 4;
+
+    // This quote doesn't belong to current trading day.
+    INDICATOR_PAST = 5;
+
+    // Quote is generated from another one.
+    // E.g. for contracts with PricingFallBack OTC contributor parameter set to 1 if there is no best ask,
+    // but there is a trade, trade price is sent as a best ask with this indicator along with the trade.
+    INDICATOR_FALL_BACK_TO_TRADE_OR_SETTLEMENT = 6;
+
+    // Quote is non-settlement insertion correction.
+    // Used only when Quote is a part of RealTimeMarketData.correction.
+    INDICATOR_INSERTION = 7;
+
+    // Quote is deletion correction.
+    // Used only when Quote is a part of RealTimeMarketData.correction.
+    INDICATOR_DELETION = 8;
+
+    // This is an Off Market quote, it does not affect Open/High/Low/Last
+    // session prices and is not used in bar updating.
+    INDICATOR_OFF_MARKET = 9;
+
+    // Quote is caused by change in currency conversion price.
+    // Applicable only for best bid and best ask quotes.
+    INDICATOR_CURRENCY_RATE_CHANGED = 10;
+  }
+
+  // This field is associated with Indicator enum type.
+  repeated uint32 indicators = 5;
+
+  // Optional sales condition of the quote.
+  enum SalesCondition
+  {
+    // Hit trade.
+    SALES_CONDITION_HIT = 1;
+
+    // Take trade.
+    SALES_CONDITION_TAKE = 2;
+
+    // One leg of a spread.
+    SALES_CONDITION_SPREAD_LEG = 3;
+
+    // The market participant was the originator of the transaction.
+    // He completes trade on buy with price matched by latest Best Ask price.
+    SALES_CONDITION_BUY_SIDE_AGGRESSOR = 4;
+
+    // The market participant was the originator of the transaction.
+    // He completes trade on sell with price matched by latest Best Bid price.
+    SALES_CONDITION_SELL_SIDE_AGGRESSOR = 5;
+  }
+
+  // This field is associated with SalesCondition enum type.
+  optional uint32 sales_condition = 7;
+
+  // Trade attributes.
+  optional TradeAttributes trade_attributes = 9;
+
+  // Currency price used to calculate scaled prices in this message.
+  // correct_price_scale from currency rate contract should be used to get correct price.
+  optional sint32 scaled_currency_rate_price = 10;
+}
+
+// Quote trade attributes.
+message TradeAttributes
+{
+  // Buyer contributor id from ContributorMetadata.
+  optional sint32 buyer = 1;
+
+  // Seller contributor id from ContributorMetadata.
+  optional sint32 seller = 2;
+
+  // Quote trade type.
+  optional string trade_type = 3;
+
+  // Match ID.
+  optional string match_id = 4;
+
+  // UTC agreement time.
+  optional google.protobuf.Timestamp agreement_time_utc = 5;
+}
+
+// Market data values of a contract.
+// The market values are sent after subscription and when there are changes not reflected in quotes.
+// Note that market values do not duplicate the updates sent as quotes. E.g. customers are expected
+// to maintain total_volume, tick_volume and OHLC based on quotes and quote indicators.
+message MarketValues
+{
+  // Open price.
+  optional sint32 scaled_open_price = 1;
+
+  // High price.
+  optional sint32 scaled_high_price = 2;
+
+  // Low price.
+  optional sint32 scaled_low_price = 3;
+
+  // Last price.
+  optional sint32 scaled_last_price = 4;
+
+  // Yesterday settlement price.
+  // NOTE: Available for current trading day only.
+  optional sint32 scaled_yesterday_settlement = 5;
+
+  // Note: use 'total_volume' instead.
+  optional uint64 scaled_total_volume = 6 [deprecated = true];
+
+  // Contract total volume.
+  optional cqg.Decimal total_volume = 21;
+
+  // Yesterday last price.
+  // NOTE: Available for current trading day only.
+  optional sint32 scaled_yesterday_last = 7;
+
+  // Indicative open price.
+  optional sint32 scaled_indicative_open = 8;
+
+  // Note: use 'indicative_open_volume' instead.
+  optional uint64 scaled_indicative_open_volume = 15 [deprecated = true];
+
+  // Indicative open volume.
+  optional cqg.Decimal indicative_open_volume = 22;
+
+  // Day index the market values are related to.
+  // 0 - most recent trading day, -1 - trading day before most recent trading day, etc.
+  required sint32 day_index = 9;
+
+  // Note: use 'open_interest' instead.
+  optional sint64 scaled_open_interest = 10 [deprecated = true];
+
+  // Open interest.
+  optional cqg.Decimal open_interest = 23;
+
+  // Contract tick volume.
+  optional uint32 tick_volume = 11;
+
+  // Settlement price.
+  optional sint32 scaled_settlement = 12;
+
+  // Marker price. Also known as PTMMM, Pre-Trade Mid-Market Mark.
+  optional sint32 scaled_marker_price = 18;
+
+  // Last trade price.
+  optional sint32 scaled_last_trade_price = 19;
+
+  // Identifiers of fields being cleared.
+  // It also specifies to clear corresponding yield values in market_yields.
+  repeated uint32 cleared_fields = 13;
+
+  // Trading date the market values belong to.
+  required sint64 trade_date = 14;
+
+  // Session index the market values are related to.
+  // 0 - first session of the day, 1 - second session of the day, etc.
+  optional uint32 session_index = 17;
+
+  // Market yields.
+  // Included if subscribed and the contract support yields.
+  optional MarketYields market_yields = 16;
+
+  // Currency price used to calculate scaled prices in this message.
+  // correct_price_scale from currency rate contract should be used to get correct price.
+  optional sint32 scaled_currency_rate_price = 20;
+}
+
+// Market yields of a contract.
+message MarketYields
+{
+  // Yield corresponding to open price.
+  optional double yield_of_open_price = 1;
+
+  // Yield corresponding to high price.
+  optional double yield_of_high_price = 2;
+
+  // Yield corresponding to low price.
+  optional double yield_of_low_price = 3;
+
+  // Yield corresponding to last price.
+  optional double yield_of_last_price = 4;
+
+  // Yesterday settlement yield.
+  // NOTE: Available for current trading day only.
+  optional double yield_of_yesterday_settlement = 5;
+
+  // Yesterday last yield.
+  // NOTE: Available for current trading day only.
+  optional double yield_of_yesterday_last = 6;
+
+  // Indicative open yield.
+  optional double yield_of_indicative_open = 7;
+
+  // Settlement yield.
+  optional double yield_of_settlement = 8;
+}
+
+// Request at-the-money strike for the option maturity.
+message AtTheMoneyStrikeRequest
+{
+  // Identifier of the option maturity representing option strike list of the same underlying and maturity period
+  // (see OptionMaturityMetadata.id).
+  required string option_maturity_id = 1;
+}
+
+// Report with at-the-money strikes.
+message AtTheMoneyStrikeReport
+{
+  // Option at-the-money strike.
+  // It is omitted if at-the-money strike cannot be calculated at the moment (e.g. due to lack of real time data).
+  optional sint32 strike = 1;
+}
+
+// Describes separate orders at price levels.
+// Detailed DOM updates (snapshot or not) can come in several DetailedDOM messages. The first will have
+// RealTimeMarketData.is_snapshot set, the rest will come as updates. The last will have
+// DetailedDOM.is_detailed_dom_complete set.
+// Update for a price level cannot be split into several messages.
+// Updates must be applied in the order they listed in.
+message DetailedDOM
+{
+  // True if this message is the last in the series of DetailedDOM updates (snapshot or not) for a contract.
+  optional bool is_detailed_dom_complete = 1;
+
+  // True if the DOM is stale, i.e. has become obsolete and is not being updated at the moment.
+  // A new DetailedDOM message with is_stale = false will be sent when data is fixed.
+  optional bool is_stale = 2;
+
+  // If true, the data for this message should be entirely replaced with 'price_levels' contents.
+  optional bool is_snapshot = 3;
+
+  // Price level updates.
+  repeated DetailedDOMAtPrice price_levels = 4;
+}
+
+// Either snapshot of orders at a price level or incremental update.
+message DetailedDOMAtPrice
+{
+  // Price level described by this message.
+  // Price is absent for No-price Orders.
+  optional sint32 scaled_price = 1;
+
+  // Side of this price level. SIDE_BUY or SIDE_SELL.
+  // This field is associated with Order.Side enum type.
+  required uint32 side = 2;
+
+  // If true, the data for this price level should be entirely replaced with 'orders' contents.
+  optional bool is_snapshot = 3;
+
+  // All orders at the price level, if is_snapshot is true, or changes to the price level, otherwise.
+  repeated DetailedDOMOrder orders = 4;
+}
+
+// A single order or change to an existing order (depending on DetailedDOMAtPrice.is_snapshot).
+message DetailedDOMOrder
+{
+  enum Operation
+  {
+    // A new order is added.
+    OPERATION_INSERT = 0;
+
+    // An existing order is removed.
+    OPERATION_REMOVE = 1;
+
+    // An existing order is modified but remains at the same price level.
+    OPERATION_MODIFY = 2;
+
+    // An existing order is removed from its current price level to another one.
+    OPERATION_MOVE_FROM_PRICE = 3;
+
+    // An existing order is inserted into its new price level.
+    // Note, some fields can also change.
+    // Note, relative order of OPERATION_MOVE_FROM_PRICE and OPERATION_MOVE_TO_PRICE is not defined.
+    OPERATION_MOVE_TO_PRICE = 4;
+  }
+
+  // Same as OrderStatus.detailed_dom_order_id.
+  // The field is also non-empty for other users' orders. So, to determine user's place in orders
+  // queue user must check if this is his order using the contract_id and detailed_dom_order_id pair.
+  required string detailed_dom_order_id = 1;
+
+  // Associated with Operation enum.
+  optional uint32 operation = 2;
+
+  // Order Index at the price level.
+  // It is the index after all updates up to this one have been applied.
+  // The index is specified only if it cannot be deduced:
+  //  - for INSERT operation it is omitted if equals order_index in previous DetailedDOMOrder plus 1;
+  //  - for MODIFY operation it is specified if order place relative to other orders in a price level changed.
+  optional uint32 order_index = 3;
+
+  // Note: use 'volume' instead.
+  optional uint64 scaled_volume = 5 [deprecated = true];
+
+  // Order volume, if changed or new order.
+  optional cqg.Decimal volume = 7;
+
+  // [obsolete] This operation is no longer supported.
+  optional uint32 obsolete_discretionary_offset = 6 [deprecated = true];
+}
+
+// Request for quotation (RFQ).
+message RFQ
+{
+  // Side of RFQ.
+  enum Side
+  {
+    // Any.
+    SIDE_ANY = 0;
+
+    // Bid.
+    SIDE_BID = 1;
+
+    // Ask.
+    SIDE_ASK = 2;
+
+    // Cross.
+    SIDE_CROSS = 3;
+  }
+
+  // Exchange ID of the request.
+  optional string exchange_request_id = 1;
+
+  // Timestamp provided by exchange (UTC).
+  optional google.protobuf.Timestamp utc_timestamp = 2;
+
+  // Specifies side of active RFQ.
+  // This field is associated with Side enum type.
+  optional uint32 side = 3;
+
+  // RFQ volume.
+  optional cqg.Decimal volume = 4;
+
+  // Expiration time provided by exchange (UTC).
+  optional google.protobuf.Timestamp expiration_utc_timestamp = 5;
+}
+
+// RFQ request. Used to create RFQ on market.
+message RFQRequest
+{
+  // Client ID of the request.
+  // It is required field.
+  optional uint32 client_request_id = 1;
+
+  // Id of an account that is used to request quote.
+  // It is required field.
+  optional sint32 account_id = 2;
+
+  // Contract id.
+  // It is required field.
+  optional uint32 contract_id = 3;
+
+  // Is the request entered manually.
+  // False or omitted means that request is created by automated system.
+  optional bool is_manual = 4;
+
+  // Specifies side of requested quote. Default value is RFQ.SIDE_ANY.
+  // This field is associated with RFQ.Side enum type.
+  optional uint32 side = 5;
+
+  // Specifies size of requested quote. Unspecified value means "doesn't matter".
+  optional cqg.Decimal size = 6;
+
+  // Time when RFQ should be created (UTC).
+  optional google.protobuf.Timestamp execution_utc_timestamp = 7;
+
+  // Regulatory Algorithm ID for client algorithm associated with this request, if any.
+  // This field is applicable only for exchanges that use it, e.g. Eurex.
+  optional uint32 client_regulatory_algorithm_id = 8;
+
+  // Quote request expiration date/time (UTC).
+  // Note: there is no way to cancel RFQ. The only way to manage its lifetime is to set expiration_utc_timestamp.
+  optional google.protobuf.Timestamp expiration_utc_timestamp = 9;
+}
+
+// Result of RFQ request.
+message RFQReport
+{
+  enum StatusCode
+  {
+    /// Success codes (0 - 99)
+    STATUS_CODE_SUCCESS = 0;
+
+    /// Failure codes (100+)
+    // General failure.
+    STATUS_CODE_FAILURE = 101;
+
+    // Request parameters are invalid.
+    STATUS_CODE_INVALID_PARAMS = 102;
+
+    // RFQ is not supported for specified contract.
+    STATUS_CODE_NOT_SUPPORTED_FOR_CONTRACT = 103;
+  }
+
+  // Client ID of the request.
+  // It is required field.
+  optional uint32 client_request_id = 1;
+
+  // Exchange ID of the request.
+  // It's set if status_code = STATUS_CODE_SUCCESS.
+  optional string exchange_request_id = 2;
+
+  // Status code.
+  // This field is associated with StatusCode enum type.
+  optional uint32 status_code = 3;
+
+  // Optional failure details.
+  optional shared_1.Text details = 4;
+
+  // Regulatory Algorithm ID actually sent to the exchange for this request, if any.
+  // Will differ from client_regulatory_algorithm_id if any CQG algorithm was applied to the order.
+  optional uint32 effective_regulatory_algorithm_id = 5;
+}
+
+// Specifies market state for placing orders.
+message MarketState
+{
+  // Current trading session state and allowed order actions.
+  // If omitted then there are exchange specific market state changes that do not affect the trading state.
+  optional TradingState trading_state = 1;
+
+  // Array of exchange specific market state elements.
+  repeated ExchangeSpecificMarketState exchange_specifics = 2;
+}
+
+// Specifies trading session state and allowed order actions.
+message TradingState
+{
+  // Indicates exchange trading session state.
+  enum ExchangeState
+  {
+    // The state before trading session opens.
+    EXCHANGE_STATE_PRE_OPEN = 1;
+
+    // The state when trading session is open.
+    EXCHANGE_STATE_OPEN = 2;
+
+    // The state when trading session is closed.
+    EXCHANGE_STATE_CLOSED = 3;
+
+    // The state when trading is halted.
+    EXCHANGE_STATE_HALTED = 4;
+
+    // The state when trading is suspended.
+    EXCHANGE_STATE_SUSPENDED = 5;
+  }
+
+  // Indicates the current exchange state.
+  // This field is associated with ExchangeState enum type.
+  // If omitted then the exchange does not provide the state.
+  optional uint32 exchange_state = 1;
+
+  // Indicates that order placing is allowed.
+  optional bool allow_place_order = 2;
+
+  // Indicates that order canceling is allowed.
+  optional bool allow_cancel_order = 3;
+
+  // Indicates that order modification is allowed.
+  optional bool allow_modify_order = 4;
+
+  // Indicates that matching engine enabled on exchange.
+  optional bool matching_enabled = 5;
+}
+
+// Exchange specific market state element represented by tag/value pair.
+// Array of the elements describes entire market state.
+message ExchangeSpecificMarketState
+{
+  // The market state element tag. Not all exchanges provide it.
+  optional string tag = 1;
+
+  // The market state element value.
+  optional string value = 2;
+}
+
+// Parameters of OptionCalculationRequest
+message OptionCalculationParameters
+{
+  // Identifier of the option maturity representing option strike list of the same underlying and maturity period
+  // (see OptionMaturityMetadata.id).
+  optional string option_maturity_id = 1;
+
+  // Server side contract identifiers. Leave it empty to request all strikes for the given maturity.
+  repeated uint32 strike_contract_ids = 2;
+}
+
+// Request for Greeks and other option calculations
+message OptionCalculationRequest
+{
+  // Type of request action.
+  enum RequestType
+  {
+    // Calculation request with subscription for updates.
+    REQUEST_TYPE_SUBSCRIBE = 2;
+
+    // Drop subscription request and unsubscribe.
+    REQUEST_TYPE_DROP = 3;
+  }
+
+  // ID of the request. Cannot be empty.
+  optional uint32 request_id = 1;
+
+  // Request parameters.
+  optional OptionCalculationParameters option_calculation_parameters = 2;
+
+  // This field is associated with RequestType enum type.
+  // REQUEST_TYPE_SUBSCRIBE operation is processed by default.
+  optional uint32 request_type = 3;
+}
+
+// Calculated values
+message OptionCalculationValues
+{
+  // Server side contract id.
+  optional uint32 strike_contract_id = 1;
+
+  // The most recent price of the underlying instrument at the time of the option contract price used in calculations.
+  optional sint32 scaled_coherent_underlying_price = 2;
+
+  // Calculated Implied Volatility in percents.
+  optional double implied_volatility = 3;
+
+  // Calculated Theoretical Price in correct price format.
+  optional double theov = 4;
+
+  // Calculated Delta Greek value in percents.
+  // Represents the ratio of the change in the correct theoretical price
+  // over the change in the correct underlying price.
+  optional double delta = 5;
+
+  // Calculated Gamma Greek value in percents.
+  // Represents Delta Greek change which occurs if correct underlying price increases by 1.
+  // Correct underlying price can be calculated by multiplying OptionCalculationReport.scaled_underlying_price
+  // by correct_price_scale of the underlying contract.
+  optional double gamma = 6;
+
+  // Calculated Vega Greek value.
+  // Represents correct theoretical price change which occurs if Implied Volatility increases by 1%.
+  optional double vega = 7;
+
+  // Calculated Theta Greek value.
+  // Represents correct theoretical price change which occurs if number of days to expiration decreases by one day.
+  optional double theta = 8;
+
+  // Calculated Rho Greek value.
+  // Represents correct theoretical price change which occurs if Interest Rate increases by 1%.
+  optional double rho = 9;
+
+  // Deleted flag is used in updates when entity is removed.
+  // Only strike_contract_id will be provided in this case.
+  optional bool deleted = 10;
+}
+
+// Option calculation response
+message OptionCalculationReport
+{
+  enum StatusCode
+  {
+    /// success codes (1 - 99)
+    // Request is processed and subscription is established.
+    STATUS_CODE_SUBSCRIBED = 1;
+
+    // Subscription is dropped by a client request.
+    STATUS_CODE_DROPPED = 2;
+
+    // Unsolicited information update because of subscription.
+    STATUS_CODE_UPDATE = 3;
+
+    // Currently subscription is disconnected. Possible reasons: communication issues, metadata update.
+    // NOTE: Clients should not resubscribe in this case, the server will restore subscription with
+    // sending STATUS_CODE_SUBSCRIBED status.
+    STATUS_CODE_DISCONNECTED = 4;
+
+    /// failure codes (100+)
+    // general failure
+    STATUS_CODE_FAILURE = 101;
+
+    // Subscription parameters are invalid.
+    STATUS_CODE_INVALID_PARAMS = 102;
+
+    // The user is not allowed to be subscribed to this Instrument.
+    STATUS_CODE_ACCESS_DENIED = 103;
+
+    // The subscription count limit has been violated.
+    STATUS_CODE_SUBSCRIPTION_LIMIT_VIOLATION = 104;
+
+    // The request rate limit has been violated.
+    STATUS_CODE_REQUEST_RATE_LIMIT_VIOLATION = 105;
+
+    // Market data source was deleted because of expiration or for another reason.
+    STATUS_CODE_DELETED = 106;
+  }
+
+  // Request ID.
+  optional uint32 request_id = 1;
+
+  // Subscription result.
+  // This field is associated with StatusCode enum type.
+  optional uint32 status_code = 2;
+
+  // Timestamp of the latest event that caused calculations included in this report.
+  optional int64 up_to_utc_time = 3;
+
+  // Interest Rate within a range (0;1], where 1 means 100%, 0.1 means 10%.
+  optional double interest_rate = 4;
+
+  // Latest quote price of the underlying instrument at the moment of calculations.
+  optional sint32 scaled_underlying_price = 5;
+
+  // Calculated values.
+  repeated OptionCalculationValues values = 6;
+
+  // Optional failure details.
+  optional shared_1.Text details = 7;
+
+  // True means that requested data is complete at the moment,
+  // false means more report messages are expected for completeness.
+  optional bool is_report_complete = 8 [default = true];
+}
