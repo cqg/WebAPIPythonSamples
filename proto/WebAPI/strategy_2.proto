@@ -7,6 +7,7 @@ package strategy_2;
 import "WebAPI/metadata_2.proto";
 import "WebAPI/strategy_definition_2.proto";
 import "common/decimal.proto";
+import "common/shared_1.proto";
 import "google/protobuf/timestamp.proto";
 
 // Request for algo strategies definitions.
@@ -33,6 +34,10 @@ message StrategyDefinitionRequest
   // Some exchanges require an account ID in the process of defining a UDS. For those exchanges this is a
   // required field.
   optional sint32 account_id = 2;
+
+  // Exchange specific extra attributes.
+  // List of supported attributes can be found in document ExchangeExtraAttributesForStrategyDefinition.adoc.
+  repeated shared_1.NamedValue exchange_extra_attributes = 3;
 }
 
 // Report of the contract metadata assigned to the strategy.
@@ -93,11 +98,18 @@ message SyntheticStrategyProperties
   // (The same as origin_order_id for the root immediate legs).
   optional string root_order_id = 3;
 
-  // Node index of the synthetic order (specified by root_order_id);
-  // allows client to associate this order with a particular node of the synthetic strategy
-  // (either a leg or a nested strategy).
-  // LegDefinition.node_index or StrategyDefinition.node_index value.
-  optional uint32 node_index = 4;
+  // Note: use origin_node_number instead.
+  optional uint32 node_index = 4 [deprecated = true];
+
+  // Node number of the synthetic order (specified by origin_order_id);
+  // allows client to associate the order which the message belogns to
+  // with a particular node of the parent synthetic strategy (either a leg or a nested strategy).
+  // This is either LegDefinition.node_number or StrategyDefinition.node_number value.
+  optional sint32 origin_node_number = 6;
+
+  // When released is set to true, it indicates that the synthetic strategy leg has been released for manual control.
+  // I.e. it is no longer linked to the synthetic strategy order.
+  optional bool released = 5;
 }
 
 // Defines how a placed synthetic strategy order will be executed.
@@ -122,9 +134,13 @@ message StrategyTradingParameters
 // Parameters associated with a concrete leg.
 message StrategyOrderLegParameters
 {
-  // Node index in the strategy definition the parameters are related to
-  //(StrategyDefinition.node_index or LegDefinition.node_index value).
-  required uint32 node_index = 1;
+  // Note: use node_path instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Path in the tree of the strategy from the root to the leg node.
+  // The format is described in the header of strategy_definition_2.StrategyDefinition message.
+  // It is a required field in server message.
+  optional string node_path = 5;
 
   // Account id to place an order on the leg. If not set, the account id of the order used instead.
   optional sint32 account_id = 2;
@@ -143,8 +159,13 @@ message StrategyOrderLegParameters
 // Synthetic strategy MKT order parameters
 message StrategyMarketOrderParameters
 {
-  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index).
-  required uint32 node_index = 1;
+  // Note: use node_path instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Path in the tree of the strategy from the root to the strategy node.
+  // The format is described in the header of strategy_definition_2.StrategyDefinition message.
+  // It is a required field in server message.
+  optional string node_path = 5;
 
   // For Iceberg orders:
   // 'true' means replenish qty on the filled leg immediately upon receiving primary fill;
@@ -192,8 +213,13 @@ message StrategyLimitOrderParameters
     PRICING_METHOD_AVERAGE_ORDER_PRICE = 2;
   }
 
-  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index value).
-  required uint32 node_index = 1;
+  // Note: use node_path instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Path in the tree of the strategy from the root to the strategy node.
+  // The format is described in the header of strategy_definition_2.StrategyDefinition message.
+  // It is a required field in server message.
+  optional string node_path = 9;
 
   // Defines whether replenish quantity on primary fill or not.
   // For Iceberg orders:
@@ -219,6 +245,9 @@ message StrategyLimitOrderParameters
 
   // Parameters for strategy legs.
   repeated LimitOrderLegDescription leg_descriptions = 7;
+
+  // Number of incomplete (hung) strategy lots that don't block next iceberg slice.
+  optional double iceberg_hung_lots_limit = 8;
 }
 
 // STP order parameters of the root or a nested strategy.
@@ -234,8 +263,13 @@ message StrategyStopOrderParameters
     STOP_SIDE_ASK = 2;
   }
 
-  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index value).
-  required uint32 node_index = 1;
+  // Note: use node_path instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Path in the tree of the strategy from the root to the strategy node.
+  // The format is described in the header of strategy_definition_2.StrategyDefinition message.
+  // It is a required field in server message.
+  optional string node_path = 4;
 
   // The side of strategy price that STP orders watch for. One of StopSide enums.
   required uint32 stop_side = 2;
@@ -268,8 +302,13 @@ message StrategyAggregationParameters
     AGGR_OVERFILL_MODE_PRESERVE_QUEUE_POSITION = 3;
   }
 
-  // Node index in the strategy definition the parameters are related to (StrategyDefinition.node_index).
-  required uint32 node_index = 1;
+  // Note: use node_path instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Path in the tree of the strategy from the root to the strategy node.
+  // The format is described in the header of strategy_definition_2.StrategyDefinition message.
+  // It is a required field in server message.
+  optional string node_path = 5;
 
   // Mode of overfill handling. One of AggrOverfillMode enums.
   required uint32 overfill_mode = 2;
@@ -284,8 +323,12 @@ message StrategyAggregationParameters
 // Description of aggregation strategy legs.
 message AggregationLegDescription
 {
-  // Node index in the strategy definition the parameters are related to (LegDefinition.node_index value).
-  required uint32 node_index = 1;
+  // Note: use node_number instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Node number in the strategy definition the parameters are related to (LegDefinition.node_number value).
+  // It is a required field in server message.
+  optional sint32 node_number = 6;
 
   // Note: use working_threshold instead.
   optional uint32 uint32_working_threshold = 2 [deprecated = true];
@@ -317,9 +360,12 @@ message PriceShifting
 // LMT order parameters for a leg.
 message LimitOrderLegDescription
 {
-  // Node index in the strategy definition the parameters are related to
-  // (StrategyDefinition.node_index or LegDefinition.node_index value).
-  required uint32 node_index = 1;
+  // Note: use node_number instead.
+  optional uint32 node_index = 1 [deprecated = true];
+
+  // Node number in the strategy definition the parameters are related to (LegDefinition.node_number value).
+  // It is a required field in server message.
+  optional sint32 node_number = 12;
 
   // All the attributes below are mutually exclusive.
   // Sets the leg as working and place LMT orders.
@@ -671,9 +717,8 @@ message GoMarket
   // Order id assigned by the server after the last modification.
   required string order_id = 2;
 
-  // Id of the hang from the SyntheticHang message,
-  // if this request applies to hung quantity on a synthetic strategy order;
-  // Not set, if this request applies to the whole order.
+  // Id of the hang from the SyntheticHang message.
+  // This is a required field for a synthetic strategy order.
   optional sint32 hang_id = 3;
 
   // Client side time when a request was submitted (UTC).

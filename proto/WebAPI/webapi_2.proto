@@ -6,6 +6,7 @@ package WebAPI_2;
 
 import "WebAPI/account_authorization_2.proto";
 import "WebAPI/api_limit_2.proto";
+import "WebAPI/economic_calendar_2.proto";
 import "WebAPI/historical_2.proto";
 import "WebAPI/instrument_definition_2.proto";
 import "WebAPI/market_data_2.proto";
@@ -20,10 +21,9 @@ import "WebAPI/trade_routing_2.proto";
 import "WebAPI/trading_account_2.proto";
 import "WebAPI/trading_session_2.proto";
 import "WebAPI/user_session_2.proto";
-import "common/shared_1.proto";
 
-// Last changes were made on 18 May 2022
-// Version 2.87 - (version number is constructed as 'MAJOR.MINOR' from the following enums)
+// Last changes were made on 31 Oct 2024
+// Version 2.230 - (version number is constructed as 'MAJOR.MINOR' from the following enums)
 
 enum ProtocolVersionMajor
 {
@@ -37,7 +37,7 @@ enum ProtocolVersionMinor
 {
   // Minor number is increased for binary backward compatible protocol versions when new messages and/ or fields are
   // added without removing/ changing any existing messages and fields (new 'proto' file is not created)
-  PROTOCOL_VERSION_MINOR = 87;
+  PROTOCOL_VERSION_MINOR = 230;
 }
 
 // Protocol rules:
@@ -74,6 +74,9 @@ enum ProtocolVersionMinor
 //     Old volume fields are left only for compatibility with clients using the protocol before
 //     cqg.Decimals volumes introduction.
 // 16) Avoid usage of commonly used keywords in message field names.
+// 17) Protocol time ranges are limited from 01/01/1900 to 01/01/2100 inclusive.
+// 18) Currency codes are ISO 4217 based. Cryptocurrencies use codes that are ISO-4217-style, though usually not actual
+//     ISO codes (e.g. can be longer than 3 characters).
 
 // Client to Server message, must include at least one field.
 // Logon, LogonRoutineClient, RestoreOrJoinSession or ObtainDemoCredentials are required to be the first
@@ -137,12 +140,16 @@ message ClientMsg
 
   // Rules requests.
   // Number of simultaneous defined rules is limited, 100 by default.
+  // Rule requests rate is limited, 30 per 60 seconds by default.
   repeated rules_1.RuleRequest rule_requests = 10;
 
   // Messages for accounts that require separate authorization process.
-  repeated account_authorization_2.AccountLogon account_logon_requests = 11;
+  repeated account_authorization_2.AccountLogon account_logon_requests = 11 [deprecated = true];
   repeated account_authorization_2.AccountPasswordChange account_password_change_requests = 12;
   repeated account_authorization_2.AccountLogoff account_logoff_requests = 13;
+  repeated account_authorization_2.AccountLogonRoutineClient account_logon_routines_client = 19;
+  repeated account_authorization_2.AccountPasswordChangeRoutineClient
+    account_password_change_routines_client = 20;
 
   // Meta-data related requests is an administrative message to manipulate
   // Security and instrument settings.
@@ -162,8 +169,12 @@ message ClientMsg
   // Number of simultaneous option calculation requests with subscription for updates is limited, 10 by default.
   repeated market_data_2.OptionCalculationRequest option_calculation_requests = 18;
 
+  // RFQ subscription requests.
+  // Request rate is limited, 1000 requests per hour by default.
+  repeated market_data_2.RFQSubscriptionRequest rfq_subscription_requests = 200;
+
   // Reserved for internal use.
-  extensions 200 to 249;
+  extensions 201 to 249;
 }
 
 // Server to Client message, server can include different fields in a single message.
@@ -189,11 +200,16 @@ message ServerMsg
 
   // Trade routing messages from server.
   repeated order_2.OrderRequestReject order_request_rejects = 2;
+  repeated order_2.OrderRequestAck order_request_acks = 25;
   repeated trade_routing_2.TradeSubscriptionStatus trade_subscription_statuses = 3;
   repeated trade_routing_2.TradeSnapshotCompletion trade_snapshot_completions = 4;
   repeated order_2.OrderStatus order_statuses = 5;
   repeated trade_routing_2.PositionStatus position_statuses = 6;
-  repeated trade_routing_2.CollateralStatus collateral_statuses = 7;
+  repeated trade_routing_2.CollateralStatus collateral_statuses = 7 [deprecated = true];
+  repeated trade_routing_2.AccountSummaryStatus account_summary_statuses = 24;
+  repeated trade_routing_2.ExchangePositionStatus exchange_position_statuses = 28;
+  repeated trade_routing_2.ExchangeBalanceStatus exchange_balance_statuses = 29;
+  repeated order_2.GoFlatStatus go_flat_statuses = 30;
 
   // Market data messages from server.
   repeated market_data_2.MarketDataSubscriptionStatus market_data_subscription_statuses = 8;
@@ -209,9 +225,12 @@ message ServerMsg
   repeated rules_1.RuleResult rule_results = 15;
 
   // Result messages for accounts that require separate authorization process.
-  repeated account_authorization_2.AccountLogonResult account_logon_results = 16;
+  repeated account_authorization_2.AccountLogonResult account_logon_results = 16 [deprecated = true];
   repeated account_authorization_2.AccountPasswordChangeResult account_password_change_results = 17;
   repeated account_authorization_2.AccountLogoffResult account_logoff_results = 18;
+  repeated account_authorization_2.AccountLogonRoutineServer account_logon_routines_server = 26;
+  repeated account_authorization_2.AccountPasswordChangeRoutineServer
+    account_password_change_routines_server = 27;
 
   // Results of Meta-data change request.
   repeated metadata_admin_2.MetadataAdminResult metadata_admin_results = 20;
@@ -225,8 +244,11 @@ message ServerMsg
   // Results of option calculation request.
   repeated market_data_2.OptionCalculationReport option_calculation_reports = 23;
 
+  // RFQ subscription reports.
+  repeated market_data_2.RFQSubscriptionReport rfq_subscription_reports = 200;
+
   // Reserved for internal use.
-  extensions 200 to 249;
+  extensions 201 to 249, 300;
 }
 
 // Request for information.
@@ -268,6 +290,13 @@ message InformationRequest
   // Request is accepted only if the user is not subscribed
   // and there is no pending request for this information at the moment.
   optional trading_account_2.CurrencyRatesRequest currency_rates_request = 6;
+
+  // Request for currency rate source contracts for all brokerages user's accounts belong to.
+  // Only one subscription is possible.
+  // Request rate is limited, 100 per 24 hours by default.
+  // Request is accepted only if the user is not subscribed
+  // and there is no pending request for this information at the moment.
+  optional trading_account_2.CurrencyRateSourcesRequest currency_rate_sources_request = 41;
 
   // Request for session information.
   // Number of simultaneous requests in processing is limited, 10 by default.
@@ -346,10 +375,6 @@ message InformationRequest
   // Subscription is not supported for this request.
   optional symbol_browsing_2.SymbolRequest symbol_request = 23;
 
-  // Request for a list of entitlements of the current user.
-  // Subscription is not supported for this request yet.
-  optional shared_1.EntitlementRequest entitlement_request = 24;
-
   // Request contract metadata by contract ID.
   optional metadata_2.ContractMetadataRequest contract_metadata_request = 25;
 
@@ -360,6 +385,8 @@ message InformationRequest
 
   // Request contributor metadata by contributor group ID.
   // Request rate is limited, 300 per 1 hour by default.
+  // Number of simultaneous requests in processing is limited, 300 by default.
+  // Number of simultaneous update subscriptions is limited, 300 by default.
   optional metadata_2.ContributorMetadataRequest contributor_metadata_request = 28;
 
   // WebAPI user limits request.
@@ -384,19 +411,81 @@ message InformationRequest
 
   // Request MarketState metadata by MarketState group ID.
   // Request rate is limited, 300 per 1 hour by default.
+  // Number of simultaneous requests in processing is limited, 300 by default.
+  // Number of simultaneous update subscriptions is limited, 300 by default.
   optional metadata_2.MarketStateMetadataRequest market_state_metadata_request = 34;
 
   // Request (non-strategy) instrument definition with no subscription.
   // Request rate is limited, 10000 per 24 hours by default.
   optional instrument_definition_2.InstrumentDefinitionRequest instrument_definition_request = 35;
 
-  // Request metadata of available exchanges
-  // Number of subscriptions and simultaneous requests in processing is limited, 1 by default.
+  // Request metadata of available exchanges.
+  // Number of subscriptions and simultaneous requests in processing is limited, 1 per connection by default.
   optional metadata_2.ExchangeMetadataRequest exchange_metadata_request = 36;
+
+  // Request for a subscription on metadata for a group of instruments based on given list of securities.
+  // Request rate is limited, 10000 per 24 hours by default.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Number of simultaneous update subscriptions is limited, 100 by default.
+  // Multiple subscriptions on the same set of securities are prohibited.
+  optional metadata_2.InstrumentGroupBySecuritiesRequest instrument_group_by_securities_request = 37;
+
+  // Request for a subscription on metadata for a group of instruments of a particular exchange.
+  // Request rate is limited, 10000 per 24 hours by default.
+  // Number of simultaneous requests in processing is limited, 5 by default.
+  // Number of simultaneous update subscriptions is limited, 100 by default.
+  // Multiple subscriptions on the same exchange ID are prohibited.
+  optional metadata_2.InstrumentGroupByExchangeRequest instrument_group_by_exchange_request = 38;
+
+  // Request for a list of securities for a particular exchange.
+  // Request rate is limited, 300 per 1 hour by default.
+  // Number of simultaneous requests in processing is limited, 300 by default.
+  // Number of simultaneous update subscriptions is limited, 300 by default.
+  optional metadata_2.ExchangeSecuritiesRequest exchange_securities_request = 39;
+
+  // Request for care auto activation parameters for the user.
+  // Only one subscription is possible.
+  // Request is accepted only if the user is not subscribed
+  // and there is no pending request for this information at the moment.
+  optional trade_routing_2.CareAutoActivationParametersRequest care_auto_activation_parameters_request = 40;
+
+  // Request for account risk parameters.
+  // Number of simultaneous requests in processing is limited, 1 by default.
+  // Subscription is not supported for this request.
+  optional trade_routing_2.AccountRiskParametersRequest account_risk_parameters_request = 42;
+
+  // Request list of countries with metadata for them.
+  // Request rate is limited, 5 per 5 seconds by default.
+  // Number of simultaneous requests in processing is limited, 10 by default.
+  // Number of simultaneous update subscriptions is limited, 10 by default.
+  optional metadata_2.CountryListRequest country_list_request = 43;
+
+  // Request for calendar events.
+  // Request rate is limited, 60 per 60 seconds by default.
+  // Number of simultaneous requests in processing is limited, 50 by default.
+  // Number of simultaneous update subscriptions is limited, 1 per connection by default.
+  optional economic_calendar_2.CalendarEventListRequest calendar_event_list_request = 44;
+
+  // Request list of calendar event providers.
+  // Request rate is limited, 5 per 5 seconds by default.
+  // Number of simultaneous requests in processing is limited, 10 by default.
+  // Number of simultaneous update subscriptions is limited, 10 by default.
+  optional economic_calendar_2.CalendarEventProviderListRequest calendar_event_provider_list_request = 45;
+
+  // Request list of calendar event types.
+  // Request rate is limited, 5 per 5 seconds by default.
+  // Number of simultaneous requests in processing is limited, 10 by default.
+  // Number of simultaneous update subscriptions is limited, 10 by default.
+  optional economic_calendar_2.CalendarEventTypeListRequest calendar_event_type_list_request = 46;
+
+  // Reserved for internal use.
+  extensions 24, 200 to 249;
 }
 
 // Report with requested information and subscription updates.
 // It will contain only one report type at the same time (related to id).
+// NOTE: In some cases the response may not have a typed report field (e.g in case of multiple chunks,
+//       if it is the last chunk, see is_report_complete field).
 message InformationReport
 {
   // Report ID is equal to a corresponding request and subscription ID.
@@ -417,15 +506,17 @@ message InformationReport
     // Request is processed and subscription is established.
     STATUS_CODE_SUBSCRIBED = 1;
 
-    // Subscription is dropped by a client request.
+    // The subscription is dropped by the client.
     STATUS_CODE_DROPPED = 2;
 
     // Unsolicited information update because of subscription.
     STATUS_CODE_UPDATE = 3;
 
-    // Currently subscription is disconnect because of communication issues.
+    // Currently subscription is disconnected because of communication issues.
     // NOTE: Clients should not resubscribe in this case, the server will restore subscription with
-    // sending SUBSCRIBED status once communication issues are resolved.
+    // sending SUBSCRIBED status once communication issues are resolved. Collection of items should
+    // not be cleared once DISCONNECTED status is received, and further reports should be treated as
+    // updates unless otherwise noted in request description.
     STATUS_CODE_DISCONNECTED = 4;
 
     /// failure codes (100+), subscription (if any) is dropped in case of failure.
@@ -468,6 +559,9 @@ message InformationReport
 
   // Report with currency rates per brokerage.
   optional trading_account_2.CurrencyRatesReport currency_rates_report = 8;
+
+  // Report with currency rate source contracts.
+  optional trading_account_2.CurrencyRateSourcesReport currency_rate_sources_report = 43;
 
   // Report with session information.
   optional trading_session_2.SessionInformationReport session_information_report = 9;
@@ -515,9 +609,6 @@ message InformationReport
   // Report with a symbol.
   optional symbol_browsing_2.SymbolReport symbol_report = 25;
 
-  // Report with a list of entitlements of the current user.
-  optional shared_1.EntitlementReport entitlement_report = 26;
-
   // Report with the requested contract metadata.
   optional metadata_2.ContractMetadataReport contract_metadata_report = 27;
 
@@ -547,4 +638,34 @@ message InformationReport
 
   // Report with exchange metadata
   optional metadata_2.ExchangeMetadataReport exchange_metadata_report = 38;
+
+  // Report with a group of instruments for a particular set of securities.
+  optional metadata_2.InstrumentGroupBySecuritiesReport instrument_group_by_securities_report = 39;
+
+  // Report with a group of instruments for a particular exchnage securities.
+  optional metadata_2.InstrumentGroupByExchangeReport instrument_group_by_exchange_report = 40;
+
+  // Report with a list of securities for a particular exchange.
+  optional metadata_2.ExchangeSecuritiesReport exchange_securities_report = 41;
+
+  // Report with a list of care auto activation parameters.
+  optional trade_routing_2.CareAutoActivationParametersReport care_auto_activation_parameters_report = 42;
+
+  // Report with account risk parameters.
+  optional trade_routing_2.AccountRiskParametersReport account_risk_parameters_report = 44;
+
+  // Report with a list of contries.
+  optional metadata_2.CountryListReport country_list_report = 45;
+
+  // Report with a list of calendar events.
+  optional economic_calendar_2.CalendarEventListReport calendar_event_list_report = 46;
+
+  // Report with a list of calendar event providers.
+  optional economic_calendar_2.CalendarEventProviderListReport calendar_event_provider_list_report = 47;
+
+  // Report with a list of calendar event types.
+  optional economic_calendar_2.CalendarEventTypeListReport calendar_event_type_list_report = 48;
+
+  // Reserved for internal use.
+  extensions 26, 200 to 249;
 }

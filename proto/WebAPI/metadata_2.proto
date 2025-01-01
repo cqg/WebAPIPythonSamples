@@ -8,6 +8,7 @@ import "WebAPI/metadata_admin_2.proto";
 import "WebAPI/strategy_definition_2.proto";
 import "common/decimal.proto";
 import "common/shared_1.proto";
+import "google/protobuf/timestamp.proto";
 
 // Request to resolve a symbol pattern or specific symbol identifier
 // to a specific contract with optional subscription for meta-data updates.
@@ -15,10 +16,8 @@ import "common/shared_1.proto";
 //   a) If the requested symbol points to a symbol prefix rather than a specific contract
 //      then it is resolved into the most active contract for this symbol prefix (e.g. 'EP' is resolved to 'EPU3').
 //      The update is sent when an active contract is changed (e.g. the update might contain the following 'EPZ3').
-//   b) If the requested symbol points to a specific contract which last trading date
-//      was less than 30 days ago (by default) SymbolResolutionReport is returned with 'deleted' field set to True.
-//      Else if contract's last trading day was more than 30 days ago (by default)
-//      status code NOT_FOUND is returned in InformationReport.
+//   b) If the requested symbol points to an expired contract SymbolResolutionReport is returned with 'deleted' field
+//      set to True.
 //   c) If the requested symbol points to a specific contract that is tradable right now then it is resolved to itself.
 //      Update is sent only when meta-data for such contract is changed or expired.
 //      In case of expiration SymbolResolutionReport is returned with 'deleted' field set to True.
@@ -34,7 +33,18 @@ import "common/shared_1.proto";
 //      and '?' means Nth nearest regular future and '??' means Nth nearest spot or regular future.
 //      Update is sent when the front contract expired
 //      and replaced with the following contract (relative position change).
-//      N = 0 is a special case that means 'most active' contract which works the same way as (a)
+//      N = 0 is a special case that means 'most active' contract which works the same way as (a).
+//      If requested symbol is a symbol prefix that follows '?(-N)' or '??(-N)' then it is resolved to Nth previous
+//      contract.
+//   f) If the requested short symbol is resolved to multiple instruments, the returned instrument will be chosen
+//      based on supplied lists of preferred instrument types and preferred countries:
+//      * If both lists are supplied, the type preference will be applied before the country preference;
+//      * If only the type list is supplied, it will be applied before the default country preference;
+//      * If only the country list is supplied, the default type preference will be applied before
+//        the supplied country preference;
+//      * If neither list is supplied, the default type and country preferences are applied.
+//      For example, 'AMP' can be resolved to 'S.US.AMP' or 'S.AU.AMP' depending on preferred countries
+//      having preferred instrument types 'S'.
 // NOTE: Available and active contract lists are updated within 24 hours
 //       of an expiring contract's final trading session.
 //       Meta-data updates for affected contracts, when a subscription is present, are sent when the list updates occur.
@@ -43,8 +53,25 @@ import "common/shared_1.proto";
 message SymbolResolutionRequest
 {
   // Symbol pattern to resolve.
-  // It is required field.
+  // It is a required field.
   optional string symbol = 1;
+
+  // Comma-separated list of preferred instrument types.
+  // Type is encoded as a single character:
+  //    F - Future
+  //    C - Call Option
+  //    P - Put Option
+  //    S - Equity
+  //    T - Bond
+  //    U - Strategy
+  //    X - Cash and others
+  // Example: 'F,C,P,X'
+  optional string preferred_types = 2;
+
+  // Comma-separated list of preferred countries.
+  // Two-letter ISO 3166-1 country codes or some CQG-specific exchange codes.
+  // Example: 'US,AU'
+  optional string preferred_countries = 3;
 
   // Reserved for internal use.
   extensions 100 to 199;
@@ -63,7 +90,7 @@ message SymbolResolutionReport
 // Request contract metadata by contract ID.
 message ContractMetadataRequest
 {
-  // contract ID to request the metadata.
+  // Contract ID (ContractMetadata.contract_id) to request the metadata.
   required uint32 contract_id = 1;
 }
 
@@ -93,28 +120,15 @@ message TickSizeByPrice
   required double boundary_price = 3;
 }
 
-// Describes tick size and value applied within some range of dates.
-message TickSizeByDateTillExpiration
-{
-  // Id of the record.  Starts from 0.  The record with id of 0 applies immediately before contract expiration, id of 1
-  // applies before 0th, etc.
-  required uint32 id = 1;
-
-  // Size or a single market tick in correct price format.
-  required double tick_size = 2;
-
-  // Contract tick money value in the contract's currency.
-  // Zero if not applicable (e.g. for indexes).
-  required double tick_value = 3;
-}
-
 // Metadata used for real-time and trading data conversion.
 message ConversionMetadata
 {
-  // Identifier of the currency contract used for price conversion.
+  // Identifier of the currency contract (ContractMetadata.contract_id)
+  // used for price conversion.
   optional uint32 currency_rate_contract_id = 1;
 
-  // Identifier of the currency contract used for hedging conversion.
+  // Identifier of the currency contract (ContractMetadata.contract_id)
+  // used for hedging conversion.
   optional uint32 currency_hedge_contract_id = 2;
 }
 
@@ -158,7 +172,7 @@ enum PriceDisplayMode
 }
 
 // Describes period value type.
-// See example in ContractMetadata.period_type and ContractMetadata.period_value.
+// See example in ContractMetadata.listing_period_type and ContractMetadata.listing_period_value.
 enum PeriodType
 {
   PERIOD_TYPE_MONTH = 0;
@@ -223,6 +237,35 @@ enum PricingConvention
   PRICING_CONVENTION_NET = 3;
 }
 
+// Source of closing price.
+enum CloseSource
+{
+  // Last quote except settlement.
+  CLOSE_SOURCE_LAST_QUOTE = 1;
+
+  // Settlement.
+  CLOSE_SOURCE_SETTLEMENT = 2;
+
+  // Exchange close.
+  CLOSE_SOURCE_EXCHANGE_CLOSE = 3;
+}
+
+// Type of Order.open_close_instruction support for the contract.
+enum OpenCloseType
+{
+  // Open/close instruction is not used.
+  OPEN_CLOSE_TYPE_NOT_USED = 0;
+
+  // Open/close instruction is not required but it may be used if provided.
+  OPEN_CLOSE_TYPE_OPTIONAL = 1;
+
+  // Open/close instruction is required.
+  OPEN_CLOSE_TYPE_REQUIRED = 2;
+}
+
+// Contract metadata.
+// Client must have a subscription on ContractMetadata updates in case its fields are used (e.g. its correct_price_scale
+// field when processing RealTimeMarketData). It can be done e.g. via ContractMetadataRequest.
 message ContractMetadata
 {
   // Server assigned ID for a contract, it is not the same across sessions.
@@ -279,9 +322,6 @@ message ContractMetadata
   // -------------------------------------------------------
   required uint32 display_price_scale = 4;
 
-  // [obsolete] This operation is no longer supported.
-  optional uint32 obsolete_discretionary_display_price_scale = 37 [deprecated = true];
-
   // Contract description.
   required string description = 5;
 
@@ -294,10 +334,7 @@ message ContractMetadata
   // Size or a single market tick in correct price format.
   required double tick_size = 7;
 
-  // [obsolete] This operation is no longer supported.
-  optional double obsolete_discretionary_tick_size = 36 [deprecated = true];
-
-  // Contract currency code (ISO 4217 based).
+  // Contract currency code.
   // Empty string if not applicable (e.g. for indexes).
   required string currency = 8;
 
@@ -368,17 +405,7 @@ message ContractMetadata
   // Variable tick size by contract price (if available for the contract).
   // If variable tick sizes by contract price are available, tick_size and tick_value specify the minimal tick size
   // and value among these.
-  // Only one of tick_sizes_by_price and tick_sizes_by_dte can be specified.
   repeated TickSizeByPrice tick_sizes_by_price = 23;
-
-  // Variable tick size by date till expiration (if available for the contract).  Sorted by id in ascending order.
-  // If variable tick sizes by DTE are available, tick_size and tick_value specify the tick size and value applicable at
-  // the moment of symbol resolution.
-  // Only one of tick_sizes_by_price and tick_sizes_by_dte can be specified.
-  repeated TickSizeByDateTillExpiration tick_sizes_by_dte = 24;
-
-  // Specifies which rule of TickSizeByDateTillExpiration applies now.
-  optional uint32 tick_sizes_by_dte_id = 25;
 
   // Option strike display value.
   optional sint32 strike = 26;
@@ -401,6 +428,7 @@ message ContractMetadata
   optional string contract_size = 31;
 
   // Setting which regulates how to calculate contract open positions.
+  // This field is associated with PositionTrackingType enum type.
   // POSITION_TRACKING_TYPE_NET_POSITION, if not set.
   optional uint32 position_tracking = 32;
 
@@ -431,10 +459,7 @@ message ContractMetadata
   // Recommended display mode for prices. See the PriceDisplayMode description.
   optional PriceDisplayMode price_display_mode = 35;
 
-  // [obsolete] This operation is no longer supported.
-  optional PriceDisplayMode obsolete_discretionary_price_display_mode = 38 [deprecated = true];
-
-  // Currency code (ISO 4217 based). For forex contracts only. Specifies the currency bought or sold.
+  // Currency code. For forex contracts only. Specifies the currency bought or sold.
   optional string foreign_currency = 39;
 
   // Specifies a volume unit of a contract, similar to correct_price_scale.
@@ -478,6 +503,11 @@ message ContractMetadata
   // And as such is the only common denominator securities identification number that is universally recognized.
   optional string isin = 48;
 
+  // Reference value for initial margin, expressed as money value in the contract's currency.
+  // Note the value is informational only, not updated real-time, and does not
+  // consider the account's portfolio or risk settings/parameters.
+  optional double initial_margin = 82;
+
   // Reference value for maintenance margin (required to maintain 1 lot position
   // in this contract), expressed as money value in the contract's currency.
   // Note the value is informational only, not updated real-time, and does not
@@ -497,11 +527,11 @@ message ContractMetadata
   // Optional custom contract parameters per associated OTC contributor (if any).
   repeated metadata_admin_2.ContributorParameters contributor_parameters = 54;
 
-  // Period type. This field is associated with PeriodType enum type.
-  optional uint32 period_type = 55;
+  // Type of listing period. This field is associated with PeriodType enum type.
+  optional uint32 listing_period_type = 55;
 
-  // Period value in period_type units.
-  optional uint32 period_value = 56;
+  // Value of listing period in listing_period_type units.
+  optional uint32 listing_period_value = 56;
 
   // ID of the symbol the contract represents (Symbol.id attribute).
   optional string symbol_id = 57;
@@ -514,7 +544,8 @@ message ContractMetadata
   optional sint32 contributor_group_id = 62;
 
   // If this instrument is double-quoted the field contains a contract id
-  // to request corresponding source contract metadata (see ContractMetadataRequest).
+  // to request corresponding source contract metadata
+  // (see ContractMetadataRequest and ContractMetadata.contract_id).
   optional uint32 source_contract_id = 63;
 
   // Equity issuer.
@@ -548,6 +579,52 @@ message ContractMetadata
   // This field is associated with BarBuildingTickType enum type.
   // Note: BAR_BUILDING_TICK_TYPE_SETTLEMENT is used only in build time bars.
   repeated uint32 bar_building_tick_types = 75;
+
+  // Describes what the contract is quoted in. E.g. "USD per Barrel", "Cents per Bushel"
+  optional string quoted_in = 76;
+
+  // Symbol ID (Symbol.id) of corresponding product if it was assigned to the contract.
+  optional string product_symbol_id = 77;
+
+  // Identifier of the contract (ContractMetadata.contract_id)
+  // used for hedging, if applicable.
+  // If not set, it is assumed to be the same as source contract.
+  optional uint32 hedge_with_contract_id = 78;
+
+  // If a contract is a synthetic version of real one,
+  // this field contains a ContractMetadata.contract_id of real contract.
+  optional uint32 actual_future_contract_id = 79;
+
+  // Exchange ID this instrument belongs to.
+  optional sint32 exchange_id = 80;
+
+  // True if the contract supports continuation bars.
+  optional bool supports_continuation = 81;
+
+  // Instrument business type identifier.
+  // Note: this identifier is not guaranteed to be stable, so corresponding instrument
+  // business type information should be obtained from results of SymbolCategoryListRequest
+  // (see SymbolCategory.instrument_business_type_id field), instead of saving/using this id
+  // between sessions to WebAPI.
+  optional uint32 instrument_business_type_id = 83;
+
+  // Sources of closing price.
+  // Closing price can be found in message MarketValues and historical bars (message TimeBar and other).
+  // Corresponding field name in related messages is scaled_close_price.
+  // Order of sources defines what is used as closing price if several sources are available (from highest to
+  // lowest priority).
+  // This field is associated with CloseSource enum type.
+  repeated uint32 close_sources = 84;
+
+  // Open/close type.
+  // This field is associated with OpenCloseType enum type.
+  // OPEN_CLOSE_TYPE_NOT_USED if not set.
+  optional uint32 open_close_type = 85;
+
+  // Reserved for internal use.
+  extensions 300;
+
+  reserved 24, 25, 36 to 38;
 }
 
 // Request for contributor metadata.
@@ -568,7 +645,7 @@ message ContributorMetadataReport
 // Contributor metadata.
 message ContributorMetadata
 {
-  // ID used in TradeAttributes as buyer and seller.
+  // ID used in TradeAttributes as buyer and seller, DetailedDOMOrder as contributor_id.
   // Unique for its Contributor Group ID.
   optional sint32 contributor_id = 1;
 
@@ -620,6 +697,9 @@ message OptionMaturityMetadata
   // Last trading date (local exchange date in time format, use date part only).
   optional sint64 last_trading_date = 8;
 
+  // Last trading date and time.
+  optional google.protobuf.Timestamp last_trading_date_time_utc_timestamp = 20;
+
   // Month letter and 2-digit year identifying the maturity month.
   // Note: look at comment for maturity_month_year from ContractMetadata for further info.
   optional string maturity_month_year = 9;
@@ -633,9 +713,15 @@ message OptionMaturityMetadata
   // E.g., option strikes range is changed and strikes out of the range don't appear in the group.
   optional bool instrument_group_empty = 17;
 
+  // Listing period type. This field is associated with PeriodType enum type.
+  optional uint32 listing_period_type = 18;
+
+  // Listing period value in listing_period_type units.
+  optional uint32 listing_period_value = 19;
+
   optional bool reserved1 = 5;
 
-  // reserved 6,11-16;
+  reserved 6, 11 to 16;
 }
 
 // Request a group of instruments by an instrument group identifier.
@@ -661,7 +747,7 @@ message InstrumentGroupItem
   // Instrument group item identifier.
   required string id = 1;
 
-  // Instrument name.
+  // Instrument name. The value matches ContractMetadata.contract_symbol.
   required string name = 2;
 
   // Instrument description.
@@ -690,7 +776,7 @@ message InstrumentGroupItem
   optional bool reserved1 = 5;
   optional string reserved2 = 11;
 
-  // reserved 12-16;
+  reserved 12 to 16;
 }
 
 // Request for Market State metadata.
@@ -788,7 +874,7 @@ message ExchangeMetadata
   }
 
   // Exchange ID.
-  // It is required field.
+  // It is a required field.
   optional sint32 exchange_id = 1;
 
   // This field is associated with ContributorType enum type.
@@ -805,4 +891,187 @@ message ExchangeMetadata
 
   // If present and true - exchange metadata should be deleted.
   optional bool deleted = 6;
+}
+
+// Supported instrument group types.
+enum InstrumentGroupType
+{
+  // Exchange strategies (a.k.a. User-defined strategies).
+  INSTRUMENT_GROUP_TYPE_EXCHANGE_STRATEGY = 1;
+}
+
+// Request for group of instruments based on given list of securities.
+message InstrumentGroupBySecuritiesRequest
+{
+  // IDs of the securities, can be from different exchanges.
+  // Can be queried with ExchangeSecuritiesRequest.
+  repeated string security_ids = 1;
+}
+
+// Report with a group of instruments.
+message InstrumentGroupBySecuritiesReport
+{
+  // List of instruments.
+  repeated InstrumentGroupItem instruments = 1;
+}
+
+// Request for group of instruments based on given exchange ID and type of instruments.
+message InstrumentGroupByExchangeRequest
+{
+  // Exchange ID.
+  // It is a required field.
+  optional sint32 exchange_id = 1;
+
+  // This field is associated with InstrumentGroupType enum type.
+  // It is a required field.
+  optional uint32 instrument_group_type = 2;
+}
+
+// Report with a group of instruments.
+message InstrumentGroupByExchangeReport
+{
+  // List of instruments.
+  repeated InstrumentGroupItem instruments = 1;
+}
+
+// Request for list of securities for a particular exchange and type of instruments.
+message ExchangeSecuritiesRequest
+{
+  // Exchange ID.
+  // It is a required field.
+  optional sint32 exchange_id = 1;
+
+  // This field is associated with InstrumentGroupType enum type.
+  // It is a required field.
+  optional uint32 instrument_group_type = 2;
+}
+
+// Exchange securities report.
+message ExchangeSecuritiesReport
+{
+  // List of securities.
+  repeated SecurityMetadata exchange_securities = 1;
+}
+
+// Metadata used for real-time and trading data processing for a group of contracts.
+// Note that for some contracts tick_size, tick_value or contract_size_in_units values on
+// ContractMetadata level might differ from corresponding values in ProcessingMetadata
+// (e.g., tick_size and tick_value for VTS contracts or contract_size_in_units for some option contracts).
+// In these cases ContractMetadata values should be used.
+message ProcessingMetadata
+{
+  // Currency code.
+  optional string currency = 1;
+
+  // Size or a single market tick in correct price format.
+  optional double tick_size = 2;
+
+  // Tick money value in corresponding currency. See ProcessingMetadata.currency.
+  optional double tick_value = 3;
+
+  // Contract size in the number of units (where defined). Unit is defined by contract_size_unit field.
+  optional cqg.Decimal contract_size_in_units = 4;
+
+  // Unit label for the contract size.
+  optional shared_1.Text contract_size_unit = 5;
+
+  // Security whose contracts should be used to fill PublishContract.currency_rate_contract_id.
+  // Use InstrumentGroupRequest to query contracts by group name.
+  optional string currency_rate_instrument_group_name = 6;
+
+  // Security whose contracts should be used to fill PublishContract.currency_hedge_contractd_id.
+  // Use InstrumentGroupRequest to query contracts by group name.
+  optional string currency_hedge_instrument_group_name = 7;
+}
+
+// Security metadata.
+message SecurityMetadata
+{
+  // Security ID.
+  // It is a required field.
+  optional string security_id = 1;
+
+  // Security name.
+  // It is a required field.
+  optional string name = 14;
+
+  // Security description.
+  optional string description = 15;
+
+  // CFI code (Classification of Financial Instruments, ISO 10962).
+  optional string cfi_code = 2;
+
+  // Deprecated and should not be used. Use ProcessingMetadata.currency instead.
+  optional string currency = 3 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.tick_size instead.
+  optional double tick_size = 4 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.tick_value instead.
+  optional double tick_value = 5 [deprecated=true];
+
+  // Deprecated and should not be used.
+  optional uint32 period_type = 6 [deprecated=true];
+
+  // Deprecated and should not be used.
+  optional uint32 period_value = 7 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.contract_size_in_units instead.
+  optional cqg.Decimal contract_size_in_units = 8 [deprecated=true];
+
+  // Deprecated and should not be used. Use ProcessingMetadata.contract_size_unit instead.
+  optional shared_1.Text contract_size_unit = 9 [deprecated=true];
+
+  // Optional custom security parameters per associated OTC contributor (if any).
+  repeated metadata_admin_2.ContributorParameters contributor_parameters = 10;
+
+  // ID of the symbol the security represents (Symbol.id attribute).
+  optional string symbol_id = 11;
+
+  // If this security represents a list of double-quoted contracts, the field contains identifier
+  // to request list of corresponding source instruments (see InstrumentGroupRequest).
+  optional string source_instrument_group_name = 12;
+
+  // Metadata used for real-time and trading data processing.
+  // There might be different metadata properties for different contracts within the security.
+  // Note: This collection is empty when message received as a part of ExchangeSecuritiesReport.
+  repeated ProcessingMetadata processing_metadata = 13;
+
+  // Security is deleted (used for updates).
+  optional bool deleted = 16;
+}
+
+// Country metadata.
+message CountryMetadata
+{
+  // Country ID.
+  // This is a required field.
+  optional sint32 country_id = 1;
+
+  // Country name.
+  optional string name = 2;
+
+  // Description of the country.
+  optional string description = 3;
+
+  // Abbreviation.
+  optional string abbreviation = 4;
+
+  // Two-letter country code (ISO 3166-1 alpha 2).
+  optional string country_code = 6;
+
+  // Country is deleted (used for updates).
+  optional bool deleted = 5;
+}
+
+// Request list of countries with metadata for them.
+message CountryListRequest
+{
+}
+
+// Report with a list of countries with metadata for them.
+message CountryListReport
+{
+  // List of countries with metadata for them
+  repeated CountryMetadata countries = 1;
 }

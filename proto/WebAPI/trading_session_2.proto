@@ -117,6 +117,11 @@ message SessionDay
 
   // Session post-close time offset.
   optional sint64 post_close_offset = 5;
+
+  // Original day if the session was reallocated to the next trading day.
+  // Holidays have to be applied to the original day.
+  // SessionDay with original day of week has a single day in the days_of_week list.
+  optional DayOfWeek original_day_of_week = 6;
 }
 
 // Session holiday record.
@@ -172,7 +177,7 @@ message SessionTimeRange
   // UTC time of session close.
   required sint64 close_utc_time = 3;
 
-  // UTC time of session post close.
+  // UTC time of session post-close.
   required sint64 post_close_utc_time = 4;
 
   // Trading date the session belongs to, local to exchange, time part is not used (set to 00:00).
@@ -216,17 +221,29 @@ message TradingDayTimeRangeReport
   optional bool truncated = 2;
 }
 
-// Trading day start/end times and date.
+// Trading day pre-open/post-close, open/close times and date.
 message TradingDayTimeRange
 {
   // Trading date, local to exchange, time part is not used (set to 00:00).
   required sint64 trade_date = 1;
 
-  // The next two fields are not present for holidays,
-  // because there’s no trading day for these dates, hence no start and end times.
-  // UTC time of trading day start (first session pre-Open time).
-  optional sint64 start_utc_time = 2;
+  // The next fields are not present for holidays,
+  // because there’s no trading day for these dates, hence no pre-open/post-close and open/close times.
+  // UTC time of trading day pre-open (first session pre-open time).
+  optional sint64 trading_day_pre_open_utc_time = 2;
 
-  // UTC time of trading day end (last session post-Close time).
-  optional sint64 end_utc_time = 3;
+  // UTC time of trading day open (first session open time).
+  optional sint64 trading_day_open_utc_time = 6;
+
+  // UTC time of trading day close (last session close time).
+  optional sint64 trading_day_close_utc_time = 7;
+
+  // UTC time of trading day post-close (last session post-Close time).
+  optional sint64 trading_day_post_close_utc_time = 3;
+
+  // Primary session open UTC time of trading day.
+  optional sint64 open_primary_utc_time = 4;
+
+  // Primary session close UTC time of trading day.
+  optional sint64 close_primary_utc_time = 5;
 }

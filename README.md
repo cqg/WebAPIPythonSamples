@@ -6,15 +6,15 @@ If you are just getting started with the CQG Web API, you may find it helpful to
 The following samples are included into the package:
 | File name | Description |
 |-----------|-------------|
-|`1logon.py`|Connect to API server and send client message with login credentials|
-|`2meta.py`|1logon, and send client message to associate symbol with contract id, and get metadata|
-|`3session_info.py`|1logon, and send session info id received from metadata message|
-|`4account.py`|1logon, and send client message to receive account information associated with user id|
-|`5real_time.py`|1logon, 2meta, and send client message to subscribe to real time market data updates|
-|`6bar_time.py`|1logon, 2meta, and send client message to request bar data starting at specific time|
-|`7time_and_sales.py`|1logon, 2meta, and send client message to request time and sales data starting at a specific time|
-|`8trade_subscription.py`|1logon, 2meta, and send client message to subscribe to orders, position, or collateral updates|
-|`9orders.py`|1logon, 2meta, and send client message to place or modify an order|
+|`logon.py`|Connect to API server and send client message with login credentials|
+|`meta.py`|1logon, and send client message to associate symbol with contract id, and get metadata|
+|`session_info.py`|1logon, and send session info id received from metadata message|
+|`account.py`|1logon, and send client message to receive account information associated with user id|
+|`real_time.py`|1logon, 2meta, and send client message to subscribe to real time market data updates|
+|`bar_time.py`|1logon, 2meta, and send client message to request bar data starting at specific time|
+|`time_and_sales.py`|1logon, 2meta, and send client message to request time and sales data starting at a specific time|
+|`trade_subscription.py`|1logon, 2meta, and send client message to subscribe to orders, position, or collateral updates|
+|`orders.py`|1logon, 2meta, 8trade_subscription, and send client message to place or modify an order|
 
 New requests for algo customers:
 | File name | Description |
@@ -60,7 +60,7 @@ Part of Google Protocol Buffers library
 |`user_session_2_pb2.py`|User session level messages|
 |`webapi_2_pb2.py`|CQG Web API server protocol|
 |`webapi_client.py`|helper class for connection to WebAPI server|
-|`websocket.py`|[WebSocket client library](https://pypi.python.org/pypi/websocket-client/)|
+|`websocket.py`|[3rd party library, client can use their own](https://github.com/novnc/websockify/blob/master/websockify/websocket.py)|
 
 ### \common
 | File name | Description |
@@ -71,7 +71,7 @@ Part of Google Protocol Buffers library
 ### \proto
 | File name | Description |
 |-----------|-------------|
-|[protoc.exe](https://github.com/protocolbuffers/protobuf/releases)|compiler to convert .proto files to `_pb2.py`, version 21.2 last upgrade date: 06/24/2022|
+|[protoc.exe](https://github.com/protocolbuffers/protobuf/releases)|compiler to convert .proto files to `_pb2.py`, version 29.2 last upgrade date: 12/24/2024|
 |`generater.cmd`|double click to generate .py files compiled from protocol files|
 
 ### \proto\common
@@ -83,7 +83,7 @@ Part of Google Protocol Buffers library
 #### \proto\WebAPI
 | File name | Description |
 |-----------|-------------|
-|[protocol files](https://partners.cqg.com/api-resources/web-api/documentation)|readable description of protocol messages in ProtoBuf format, version 2.87 last upgrade date: 05/18/2022|
+|[protocol files](https://partners.cqg.com/api-resources/web-api/documentation)|readable description of protocol messages in ProtoBuf format, version 2.230 last upgrade date: 10/31/2024|
 
 ## Notice
 When protocol files update, a user may obtain more information from the server by using the updated protocol:

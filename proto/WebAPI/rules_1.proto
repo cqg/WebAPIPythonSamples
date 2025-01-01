@@ -11,46 +11,81 @@ import "google/protobuf/timestamp.proto";
 ////------------------------------------------
 //// Rule messages
 
-// Client rule messages.
+// "Rule" and "Alert" words are used as synonyms.
+// Account alert - is a condition rule with account variable (see ConditionRule and AccountVariable messages below).
+// Price alert - is a condition rule with market variable (see ConditionRule and MarketVariable messages below).
+
+// Client rule (alert) messages.
 // Only one rule operation is allowed.
 message RuleRequest
 {
   // Request identifier.
   required string request_id = 1;
 
+  // Affects requests supporting subscription. It is ignored in case of other requests.
+  // If present and set to true, the subscription will be established.
+  // If present and set to false, the subscription will be dropped.
+  // If omitted the request is not considered as subscription.
+  // Note: this field is ignored by all requests except RuleListRequest and RuleEventSubscription one.
+  optional bool subscribe = 10;
+
   // Create or update a rule.
   optional SetRuleRequest set_rule_request = 2;
+
+  // Lightweight rule modification.
+  optional ModifyRuleRequest modify_rule_request = 12;
 
   // Delete a rule.
   optional DeleteRuleRequest delete_rule_request = 3;
 
-  // Get a list of rules.
-  optional RulesListRequest rules_list_request = 4;
+  // Get or subscribe to the rule list.
+  optional RuleListRequest rule_list_request = 4;
 
-  // Request notification history.
-  optional NotificationHistoryRequest notification_history_request = 5;
+  // Request rule event history.
+  optional RuleEventHistoryRequest rule_event_history_request = 5;
+
+  // Subscription to rule events.
+  optional RuleEventSubscription rule_event_subscription = 9;
 
   // Creates or modifies a destination group.
   optional CreateOrModifyDestinationGroupRequest create_or_modify_destination_group_request = 6;
 
-  // Deletes a destination group.
-  optional DeleteDestinationGroupRequest delete_destination_group_request = 7;
-
   // List destination groups.
   optional DestinationGroupListRequest destination_group_list_request = 8;
+
+  // Update destination expiration time.
+  optional UpdateDestinationExpirationTimeRequest update_destination_expiration_time_request = 11;
+
+  reserved 7;
 }
 
-// Server rule messages.
+// Server rule (alert) messages.
+// Note: all optional fields may be missing (in case of RESULT_CODE_DISCONNECTED status for example).
+// Use request_id field to identify corresponding request.
 message RuleResult
 {
   enum ResultCode
   {
-    /// success codes (0 - 100)
-    SUCCESS = 0;
+    // Success codes (0 - 100)
+    RESULT_CODE_SUCCESS = 0;
 
-    //// failure codes (100+)
+    // Request is processed and subscription is established.
+    RESULT_CODE_SUBSCRIBED = 1;
+
+    // The subscription is dropped by the client.
+    RESULT_CODE_DROPPED = 2;
+
+    // Unsolicited information update because of subscription.
+    RESULT_CODE_UPDATE = 3;
+
+    // Some problem with subscription happened and updates will not be sent. Clients should not resubscribe
+    // in this case: they will receive new RuleResult message with RESULT_CODE_SUBSCRIBED code
+    // as soon as the problem is fixed.
+    RESULT_CODE_DISCONNECTED = 4;
+
+    // Failure codes (100+)
     // General failure.
-    FAILURE = 101;
+    RESULT_CODE_FAILURE = 101;
   }
 
   // ID of a corresponding request or subscription.
@@ -66,65 +101,102 @@ message RuleResult
   // Result of set rule operation.
   optional SetRuleResult set_rule_result = 4;
 
+  // Result of rule modification operation.
+  optional ModifyRuleResult modify_rule_result = 13;
+
   // Result of delete rule operation.
   optional DeleteRuleResult delete_rule_result = 5;
 
-  // Result of rules list request.
-  optional RulesListResult rules_list_result = 6;
+  // Result of rule list request.
+  optional RuleListResult rule_list_result = 6;
 
-  // Result of notification history request.
-  optional NotificationHistoryResult notification_history_result = 7;
+  // Result of rule event history request.
+  optional RuleEventHistoryResult rule_event_history_result = 7;
+
+  // Result/updates for rule events subscription.
+  optional RuleEventSubscriptionStatus rule_event_subscription_status = 11;
 
   // Result of create or modify destination group operation.
   optional CreateOrModifyDestinationGroupResult create_or_modify_destination_group_result = 8;
 
-  // Result of delete destination group operation.
-  optional DeleteDestinationGroupResult delete_destination_group_result = 9;
-
   // Result of list destination groups request.
   optional DestinationGroupListResult destination_group_list_result = 10;
+
+  // Result of update destination expiration time operation.
+  optional UpdateDestinationExpirationTimeResult update_destination_expiration_time_result = 12;
+
+  reserved 9;
 }
 
 
 ////------------------------------------------
-//// Rule entities
+//// Rule (alert) entities
 
 // Rule definition contains one of the specific rules.
 // Only one specific rule can be specified.
 // The complete definition is expected regardless if these is a new rule or an update of existing one.
+// Note that overall serialized RuleDefinition message size is limited (100KB by default).
 message RuleDefinition
 {
   // Client ID of the rule.
   // It has to be unique for this client.
   required string rule_id = 1;
 
-  // List of optional client rule tags, the value is ignored.
-  repeated string rule_tag = 2 [deprecated = true];
-
-  // Rule expiration time, the value is ignored.
-  optional google.protobuf.Timestamp expiration_utc_timestamp = 3 [deprecated = true];
+  // List of optional client rule tags.
+  // Number of tags is limited. If limit is exceeded, maximum allowed number of tags is provided in error message.
+  // See RuleEventSubscription.rule_tags and RuleEventHistoryRequest.rule_tags fields
+  repeated string rule_tags = 2;
 
   // List of actions for rule execution.
-  repeated Action action = 4;
+  repeated Action actions = 4;
 
   // Order event rule definition.
   optional OrderEventRule order_event_rule = 5;
+
+  // Condition rule definition.
+  optional ConditionRule condition_rule = 7;
 
   // True means the rule is in execution.
   // To enable or disable the rule the client updates the rule
   // with a corresponding values of this flag.
   optional bool enabled = 6 [default = true];
+
+  // List of custom rule attributes defined by client.
+  // Note that full list of attributes has to be specified on rule's modification.
+  repeated shared_1.NamedValue attributes = 8;
+
+  // If set to true the rule with given rule_id has been deleted.
+  optional bool deleted = 9;
+
+  // Rule expiration time.
+  // The rule is disabled on expiration.
+  // This is optional field for condition rules with MarketVariable or StudySymbol.
+  // If this field is omitted it is set to "now + 1 year".
+  // Other rules don't support this field.
+  optional google.protobuf.Timestamp expiration_time = 10;
+
+  reserved 3;
 }
 
 // Possible actions for rule execution.
-// Only notifications are supported at the moment.
 message Action
 {
   // List of destinations to notify.
-  repeated shared_1.Destination destination = 4;
+  repeated shared_1.Destination destinations = 4;
 
-  // List of destination groups to notify.
-  repeated string destination_group_id = 5;
+  // Destination group to notify.
+  optional string destination_group_id = 5;
+
+  // Cancel all orders and liquidate all open positions.
+  optional GoFlatAction go_flat = 6;
+}
+
+// Cancel all orders (including parked) and liquidate all open positions.
+// The action is allowed only for condition rules with account variables.
+// The action is applied to an account which account variables triggered the condition rule.
+// It is required to specify at least one notification destination in a rule with 'go-flat' action.
+message GoFlatAction
+{
 }
 
 // Order event notification rule.
@@ -133,67 +205,430 @@ message OrderEventRule
 {
   // Optional list of accounts.
   // All accounts of the client if not specified.
-  repeated sint32 account_id = 1;
+  repeated sint32 account_ids = 1 [deprecated = true];
 
   // Optional list of order statuses that server will notify about.
-  // The server will notify about all order statuses if not specified.
+  // Note: It is not allowed to use any of the following statuses: APPROVE_REQUIRED, APPROVED_BY_EXCHANGE,
+  // APPROVE_REJECTED, MATCHED, PARTIALLY_MATCHED, TRADE_BROKEN.
+  // The server will notify about all order statuses (except those listed above) if not specified.
   // Associated with shared_1.OrderStatus.Status enum type.
-  repeated uint32 order_status = 2;
+  repeated uint32 order_statuses = 2;
 
   // Optional list of transaction statuses that server will notify about.
-  // The server will notify about all transaction statuses if not specified.
+  // Note: It is not allowed to use any of the following statuses: APPROVING, APPROVE_REQUESTED, APPROVED_BY_EXCHANGE,
+  // REJECTED_BY_USER, MATCHED, TRADE_BROKEN, TRADE_AMENDED.
+  // The server will notify about all transaction statuses (except those listed above) if not specified.
   // Note: if it's specified along with order_status field only notifications matching both filters will be sent.
   // Associated with shared_1.TransactionStatus.Status enum type.
-  repeated uint32 transaction_status = 3;
+  repeated uint32 transaction_statuses = 3;
 
   // Custom order event filters.
   repeated OrderEventFilter filters = 4;
 }
 
-////------------------------------------------
-//// Subscription entities.
-
-// Notification by a history request.
-message NotificationReport
+// Condition based rule.
+message ConditionRule
 {
-  // Notification title.
-  required shared_1.Text title = 1;
+  // Rule triggering type.
+  enum TriggeringType
+  {
+    // Triggers when the rule becomes true then disables the rule (see RuleDefinition.enabled field).
+    // Not supported for rules with account variables.
+    TRIGGERING_TYPE_ONE_TIME = 0;
 
-  // Notification body.
-  required shared_1.Text body = 2;
+    // Triggers when the rule becomes true while it was false before or if it is initially true.
+    // Any condition triggerings that happen after the previous one within a suppression period are ignored.
+    // See suppression_period field.
+    TRIGGERING_TYPE_AUTO = 1;
+  }
+  // Rule triggering type, ONE_TIME by default.
+  optional uint32 triggering_type = 1;
 
-  // Rule ID that triggered corresponding action.
-  required string rule_id = 3;
+  // Expression that describes the condition.
+  // A logical expression to evaluate.
+  // If the expression evaluates to a numeric value then zero value is considered to be false,
+  // true otherwise.
+  required Expression expression = 2;
+
+  // Title of notification to be sent on condition rule triggering.
+  // The notification is sent without waiting for all rule's actions to be executed.
+  // The length of this field is limited. If the limit is exceeded, maximum allowed length is provided in error message.
+  optional TemplateText notification_title = 3;
+
+  // Body of notification to be sent on condition rule triggering.
+  // The notification is sent without waiting for all rule's actions to be executed.
+  // The length of this field is limited. If the limit is exceeded, maximum allowed length is provided in error message.
+  // Note that actual notification might also include additional info, e.g. account information
+  // for rules based on account variables.
+  optional TemplateText notification_body = 4;
+
+  // Condition rule triggering suppression period in seconds.
+  // The rule is not triggered more often than once in this period.
+  // Server side value is used if omitted in the rule definition (30 seconds by default).
+  // Rules with account variables handles this suppression separately for each account.
+  // Server has minimal allowed suppression period (5 seconds by default). It is used if lesser
+  // value is specified.
+  optional uint32 suppression_period = 5;
+}
+
+// Template text.
+// For rules with market variables or study symbols "{contract_symbol}" occurrences if present are substituted
+// with current contract's symbol in CQG dialect.
+message TemplateText
+{
+  optional string text = 1;
+}
+
+////------------------------------------------
+//// Condition based rule entities
+
+// Logical, arithmetical or function expression.
+// The depth of expression is limited by 10 levels.
+// Only variables of the same domain are allowed within a single expression (e.g. only account variables).
+message Expression
+{
+  // List of operators.
+  // True is converted to 1 and False is converted to 0 if results of logical
+  // expressions are included into arithmetic operations.
+  // Zero is converted to False and Non Zero to True if logical value is expected.
+  // Integer and decimal values are implicitly converted to double format.
+  // Comparison between double operands is performed with epsilon precision calculated
+  // as 2.2204460492503131e-016 * max (1, |operand1|, |operand2|).
+  // Condition rule is reset to false (for AUTO rules):
+  // - result of arithmetic operation is infinity or nan,
+  // - required variable does not have a value (e.g. when AccountVariable with
+  //   TYPE_MIN_DAYS_TILL_POSITION_CONTRACT_EXPIRATION type for an account without
+  //   open positions),
+  // - in case of any other error on rule calculation.
+  enum Operator
+  {
+    // Arithmetical operators.
+    OPERATOR_ADD = 0; // The result of left_operand + right_operand.
+    OPERATOR_SUBTRACT = 1; // The result of left_operand - right_operand.
+    OPERATOR_MULTIPLY = 2; // The result of left_operand * right_operand.
+    OPERATOR_DIVIDE = 3; // The result of left_operand / right_operand.
+
+    // Logical operators.
+    OPERATOR_LESS = 10; // True if left_operand is less than right_operand.
+    OPERATOR_LESS_EQUAL = 11; // True if left_operand is less than or equal to right_operand.
+    OPERATOR_EQUAL = 12; // True if left_operand is equal to right_operand.
+    OPERATOR_NOT_EQUAL = 18; // True if left_operand is not equal to right_operand.
+    OPERATOR_GREATER_EQUAL = 13; // True if left_operand is greater than or equal to right_operand.
+    OPERATOR_GREATER = 14; // True if left_operand is greater than right_operand.
+    OPERATOR_NOT = 15; // Inverts True/Non-zero to False and False/Zero to True in left_operand.
+    OPERATOR_AND = 16; // The result of logical AND operation.
+    OPERATOR_OR = 17; // The result of logical OR operation.
+  }
+
+  // Expression type.
+  // ADD operator is used if neither operator nor function field is specified.
+  oneof expression_type
+  {
+    // Operator of the expression (see left_operand and right_operand fields).
+    uint32 operator = 1;
+
+    // Function name for the function expression (see arguments field).
+    // Please contact CQG to get the list of supported functions.
+    string function = 4;
+  }
+
+  // Left-hand side operand.
+  // Zero constant by default.
+  // Used only when operator field is specified and ignored otherwise.
+  optional Operand left_operand = 2;
+
+  // Right-hand side operand.
+  // Zero constant by default.
+  // Not used for unary operations.
+  // Used only when operator field is specified and ignored otherwise.
+  optional Operand right_operand = 3;
+
+  // List of function arguments.
+  // Used only when function field is specified and ignored otherwise.
+  repeated Operand arguments = 5;
+}
+
+// Operand for the expression.
+// One and only one field is expected.
+message Operand
+{
+  // Another expression.
+  optional Expression expression = 1;
+
+  // Constant value.
+  optional Constant constant = 2;
+
+  // Market data based variable.
+  optional MarketVariable market_variable = 3;
+
+  // Account based variable.
+  optional AccountVariable account_variable = 4;
+
+  // Study symbol.
+  optional StudySymbol study_symbol = 5;
+}
+
+// Constant value.
+message Constant
+{
+  // double value.
+  // Note that double operands are compared with epsilon precision. See Operator enum description.
+  optional double double_value = 1;
+
+  // string value.
+  // It can only be used as an argument in function expressions (see Expression.function).
+  optional string string_value = 2;
+}
+
+// Market data-based variable.
+// Number of rules with market variables (price alerts) is limited (10 by default).
+message MarketVariable
+{
+  // Symbol pattern to resolve into a contract and use its market data.
+  // Symbol must be specified in CQG dialect.
+  // It is allowed to specify a relative symbol (e.g. "EP") so that the rule will switch to a new most active
+  // contract on a rollover event.
+  // If there is no need in contract switching a full contract symbol needs to be specified
+  // (e.g. webapi_1.ContractMetadata.cqg_contract_symbol).
+  // For option contracts only full symbols are allowed.
+  // The rule becomes disabled (see RuleDefinition.enabled field) when the market data on the current contract is
+  // no longer available.
+  // Multiple market variables can use the same symbol pattern but only one symbol pattern
+  // is allowed for a condition rule.
+  // It is not allowed to use contracts with non-empty ContractMetadata.contributor_parameters.parameters lists
+  // at the moment.
+  // This is required field.
+  optional string symbol = 1;
+
+  // Type of market variable.
+  // All price based values are provided in correct format for operations
+  // in expressions (float point value). No currency conversion is applied to these values.
+  // Some intermediate updates of market variables might be skipped from rule's expression evaluation, so
+  // that if the condition gets True only for a short period of time, the rule might not trigger.
+  // Expressions with variables that use last trade price or volume are evaluated starting from
+  // the first trade occurred after the rule creation.
+  enum Type
+  {
+    // Delta between the last trade and yesterday settlement: last_trade - yesterday_settlement.
+    TYPE_LAST_TRADE_NET_CHANGE = 1;
+
+    // % delta between the last trade and yesterday settlement:
+    // 100*(last_trade - yesterday_settlement)/yesterday_settlement.
+    TYPE_LAST_TRADE_NET_CHANGE_PC = 2;
+
+    // Last trade price.
+    TYPE_LAST_TRADE_PRICE = 3;
+
+    // Last trade volume.
+    TYPE_LAST_TRADE_VOLUME = 4;
+
+    // Today's volume for the contract.
+    TYPE_CONTRACT_TOTAL_VOLUME = 5;
+
+    // Delta between best ask and best bid: ask - bid.
+    TYPE_BID_ASK_SPREAD = 6;
+
+    // Today's high.
+    TYPE_TODAYS_HIGH = 7;
+
+    // Today's low.
+    TYPE_TODAYS_LOW = 8;
+  }
+
+  // Type of market variable.
+  // This field is associated with MarketVariable.Type enum.
+  // This is required field.
+  optional uint32 type = 2;
+}
+
+// Account based variable.
+// Rule with account variables (account alert) is processed and evaluated separately for each available account.
+// Accounts excluded from processing:
+//  - Omnibus accounts.
+//  - Accounts that are members of account groups.
+//  - Accounts related to non-derivative brokerages.
+//  - Accounts without statement support (without trading_account_2.Account.cleared_by_statements=True).
+//  - Accounts that had "Zero positions at the end of the day" option during last account's clearing.
+//  - Accounts that had "Zero balances at the end of the day" option during last account's clearing.
+// Note that there is a common limit on triggering rate among all user's rules with account variables, 
+// 500 rule triggerings per hour per account by default. If it exceeds, further triggerings are suppressed
+// until rate lowers.
+// Note: Price based account variable will produce values in USD.
+message AccountVariable
+{
+  // Type of account variable.
+  enum Type
+  {
+    TYPE_UNSPECIFIED = 0;
+
+    // Margin requirement calculated for worst-case based on open positions and working orders.
+    TYPE_TOTAL_MARGIN = 1;
+
+    // Margin requirement based on current positions only.
+    TYPE_POSITION_MARGIN = 2;
+
+    // Available account funds including balance, realized profit (or loss), collateral and credits.
+    // OTE and MVO are included regarding the account risk parameters.
+    TYPE_PURCHASING_POWER = 3;
+
+    // Open trade equity, or potential profit (or loss) from futures and future-style options positions
+    // based on opening price of the position and the current future trade/best bid/best ask
+    // (regarding to the risk account settings) or settlement price if trade is not available.
+    TYPE_OTE = 4;
+
+    // OTE + UPL.
+    TYPE_OTE_UPL = 26;
+
+    // Absolute value of (OTE + UPL) if it is negative otherwise zero value.
+    TYPE_OPEN_TRADE_LOSS_UNREALIZED_LOSS = 5;
+
+    // Market value of options calculated as the current market trade/best bid/best ask of the option
+    // (regarding to the risk account settings) times the number of options
+    // (positive for long options and negative for short options) in the portfolio.
+    TYPE_MVO = 6;
+
+    // Net Liquidity Value. It includes current balance, OTE, MVO and collateral values.
+    TYPE_NLV = 7;
+
+    // Market value of futures calculated as the current market trade/best bid/best ask
+    // (regarding to the risk account settings) times the number of futures
+    // (positive for long and negative for short) in the portfolio.
+    TYPE_MVF = 8;
+
+    // Allowable margin credit of the account.
+    TYPE_MARGIN_CREDIT = 9;
+
+    // Margin excess. It consists of purchasing power minus total margin.
+    TYPE_MARGIN_EXCESS = 10;
+
+    // Cash Excess.
+    TYPE_CASH_EXCESS = 11;
+
+    // Current account's balance.
+    TYPE_CURRENT_BALANCE = 13;
+
+    // Realized profit/loss.
+    TYPE_PROFIT_LOSS = 14;
+
+    // Unrealized profit/loss for options.
+    TYPE_UNREALIZED_PROFIT_LOSS = 15;
+
+    // Sum of OTE, UPL and realized profit/loss values.
+    TYPE_OTE_UPL_AND_PL = 16;
+
+    // Cash balance from the last statement.
+    TYPE_YESTERDAY_BALANCE = 17;
+
+    // Open trade equity from the last statement.
+    TYPE_YESTERDAY_OTE = 23;
+
+    // Market value of options from the last statement.
+    TYPE_YESTERDAY_MVO = 24;
+
+    // Collateral on Deposit.
+    TYPE_YESTERDAY_COLLATERAL = 12;
+
+    // (profit_loss / abs(yesterday_balance)) in percentage.
+    TYPE_NET_CHANGE_PC = 25;
+
+    // Sum of all fill sizes for the current day.
+    TYPE_TOTAL_FILLED_QTY = 18;
+
+    // Count of filled orders for the current day.
+    TYPE_TOTAL_FILLED_ORDERS = 19;
+
+    // Sum of position quantities among all long open positions on the account.
+    TYPE_LONG_OPEN_POSITIONS_QTY = 20;
+
+    // Sum of position quantities among all short open positions on the account.
+    TYPE_SHORT_OPEN_POSITIONS_QTY = 21;
+
+    // Minimal value of days till contract expiration (in calendar days, not trading) among
+    // all open positions on contracts with expiration date on the account.
+    // It does not have a value when there are no such open positions on the account.
+    TYPE_MIN_DAYS_TILL_POSITION_CONTRACT_EXPIRATION = 22;
+  }
+
+  // Type of account variable.
+  // This is required field.
+  // This field is associated with AccountVariable.Type enum.
+  optional uint32 type = 1;
+
+  reserved 2;
+}
+
+// Study symbol.
+// Number of rules with study symbols (study alerts) is limited (10 by default).
+// Note that study symbols are only allowed in function expressions (see Expression.arguments).
+message StudySymbol
+{
+  // Symbol pattern to resolve into a contract and use its market data.
+  // Symbol must be specified in CQG dialect.
+  // It is allowed to specify a relative symbol (e.g. "EP") so that the rule will switch to a new most active
+  // contract on a rollover event.
+  // If there is no need in contract switching a full contract symbol needs to be specified
+  // (e.g. webapi_1.ContractMetadata.cqg_contract_symbol).
+  // For option contracts only full symbols are allowed.
+  // The rule becomes disabled (see RuleDefinition.enabled field) when the market data on the current contract is
+  // no longer available.
+  // This is required field.
+  optional string symbol = 1;
+}
+
+// Rule related event.
+// It might be related to a triggering of a specific rule or be a general event
+// (e.g., indicating too high overall triggering rate).
+message RuleEvent
+{
+  // Event title.
+  optional shared_1.Text title = 1;
+
+  // Event body.
+  optional shared_1.Text body = 2;
+
+  // Rule ID.
+  // Filled when the event is related to specific rule.
+  optional string rule_id = 3;
 
   // Optional notification specific information.
-  repeated shared_1.NotificationProperty notification_property = 4;
+  repeated shared_1.NotificationProperty notification_properties = 4;
 
-  // Time when the notification was triggered.
-  required google.protobuf.Timestamp when_utc_timestamp = 5;
+  // Event time.
+  optional google.protobuf.Timestamp when_utc_timestamp = 5;
+
+  // Optional error details. 
+  // Filled e.g., if some of rule's actions failed to execute on rule triggering.
+  optional shared_1.Text error_details = 6;
+
+  // Rule tags.
+  repeated string rule_tags = 7;
 }
 
 // Represents configured order rule filter for specific event.
 message OrderEventFilter
 {
-    // Filter type.
-    // This field is associated with EventFilterType enum.
-    // It is required field.
-    optional uint32 filter_type = 1;
+  // Filter type.
+  // This field is associated with EventFilterType enum.
+  // It is required field.
+  optional uint32 filter_type = 1;
 
-    // Custom filter value. (max length = 128).
-    // It is required field.
-    optional string value = 2;
+  // Custom filter value. (max length = 128).
+  // If value is not set, it means subject filtration with empty (not set) value.
+  optional string value = 2;
 }
 
 enum OrderEventFilterType
 {
-    ORDER_EVENT_FILTER_TYPE_CONTRIBUTOR_ID = 1;
+  ORDER_EVENT_FILTER_TYPE_CONTRIBUTOR_ID = 1;
 }
 
 ////------------------------------------------
 //// Rule operations
 
 // Create or update a rule.
+// Note that update of a condition rule may trigger rule actions if rule expression is evaluated to true initially,
+// even if the rule triggered in the past with the same expression and it is still true.
+// In this case you may use ModifyRuleRequest to avoid extra triggerings.
 message SetRuleRequest
 {
   // Definition of the rule.
@@ -207,11 +642,41 @@ message SetRuleResult
 {
 }
 
+// Lightweight rule modification.
+// The request contains part of rule definition that can be modified without affecting rule execution.
+message ModifyRuleRequest
+{
+  // Client ID of the rule.
+  required string rule_id = 1;
+
+  // List of actions for rule execution.
+  // If present, the list of actions in rule definition will be replaced by the given actions.
+  // If omitted (empty), this list of actions will not change.
+  repeated Action actions = 2;
+
+  // Rule revision to check before executing the request.
+  // The request will fail if the rule was modified and its rule revision changed.
+  // Optional. If omitted, rule revision is not checked.
+  // Internal field. Rule revisions are currently not available for external clients.
+  optional uint64 rule_revision = 3;
+}
+
+// Result of rule modification operation.
+message ModifyRuleResult
+{
+}
+
 // Delete a rule.
 message DeleteRuleRequest
 {
   // Rule to delete.
   required string rule_id = 1;
+
+  // Rule revision to check before executing the request.
+  // The request will fail if the rule was modified and its rule revision changed.
+  // Optional. If omitted, rule revision is not checked.
+  // Internal field. Rule revisions are currently not available for external clients.
+  optional uint64 rule_revision = 2;
 }
 
 // Result of delete rule operation.
@@ -220,25 +685,36 @@ message DeleteRuleResult
 }
 
 // Get a list of rules.
-message RulesListRequest
+message RuleListRequest
 {
-  // Optional filter with a list of tags, the value is ignored.
-  repeated string rule_tag = 1 [deprecated = true];
+  reserved 1;
 }
 
-// Result of rules list request.
-message RulesListResult
+// Result of rule list request.
+// If request does not contain 'subscribe' field or if it is set to true, this message contains all user's rules,
+// 'is_snapshot' field is set to true.
+// This message is also sent to notify about updated rules if there is active rule list subscription.
+// In this case message contains updated rules only, 'is_snapshot' field is omitted.
+// Note: If client received RESULT_CODE_DISCONNECTED result code for rule list subscription for some reason,
+// subscription will be restored later and client will receive a new RuleResult message, containing
+// RESULT_CODE_SUBSCRIBED result code and RuleListResult message with actual list of rules
+// and 'is_snapshot' field set to true.
+message RuleListResult
 {
-  // List of found rules.
+  // Rule list.
   // Clients have to be ready to receive rules that they cannot recognize
   // and ignore them. They must not remove or update unknown rules since they
   // can be used by different applications or different versions of the same application.
-  repeated RuleDefinition rule_definition = 1;
+  repeated RuleDefinition rule_definitions = 1;
+
+  // If set to true, rule_definitions contains all found rules.
+  // If omitted, rule_definitions contain changed rules only.
+  optional bool is_snapshot = 2;
 }
 
-// Request for notifications history.
+// Request for rule event history.
 // The history is limited to 30 last days.
-message NotificationHistoryRequest
+message RuleEventHistoryRequest
 {
   // Start point for the history request, inclusive.
   // Maximum allowed history is returned if omitted.
@@ -247,13 +723,52 @@ message NotificationHistoryRequest
   // Stop point for the history request, inclusive.
   // History up till now is returned if omitted.
   optional google.protobuf.Timestamp to_utc_timestamp = 2;
+
+  // Filter events by rule tags.
+  // Result contains events, triggered by rules with tags, containing at least one tag from this list.
+  // All events are returned if omitted.
+  // Number of tags is limited. If limit is exceeded, maximum allowed number of tags is provided in error message.
+  repeated string rule_tags = 3;
 }
 
-// Result of notification history request.
-message NotificationHistoryResult
+// Result of rule event history request.
+message RuleEventHistoryResult
 {
-  // List of notifications.
-  repeated NotificationReport notification_report = 1;
+  // List of rule events.
+  repeated RuleEvent rule_events = 1;
+
+  // True means that this is the last message for the request.
+  // False or empty means that more messages are expected.
+  optional bool complete = 2;
+}
+
+// Request subscription to rules events.
+// If RuleRequest message contains this request, it must contain "subscribe" field with true or false value.
+// Otherwise the message is considered as invalid.
+// Note: it does not response with events snapshot.
+// Instead, it starts to send the rule events triggered after subscription.
+// For events snapshot use RuleEventHistoryRequest.
+// Note: if RESULT_CODE_DISCONNECTED status is received while the subscription is already established,
+// client may lose some events, because they will not be resent later when RESULT_CODE_SUBSCRIBED status is received
+// again. It's necessary to use RuleEventHistoryRequest request to get events snapshot.
+message RuleEventSubscription
+{
+  // Filter events by rule tags.
+  // Result contains events, triggered by rules with tags, containing at least one tag from this list.
+  // All events are returned if omitted.
+  // Number of tags is limited. If limit is exceeded, maximum allowed number of tags is provided in error message.
+  repeated string rule_tags = 1;
+}
+
+// Response for RuleEventSubscription.
+// Note: if RuleEventHistoryRequest and RuleEventSubscription requests are sent with small interval between them,
+// their responses (RuleEventHistoryResult and RuleEventSubscriptionStatus) may contain some duplicated events.
+// To identify duplicates use
+// (RuleEvent.rule_id, RuleEvent.when_utc_timestamp, RuleEvent.notification_properties["event_id"]) fields.
+message RuleEventSubscriptionStatus
+{
+  // List of rule events.
+  repeated RuleEvent rule_events = 1;
 }
 
 ////------------------------------------------
@@ -262,39 +777,27 @@ message NotificationHistoryResult
 // Create or modify a destination group.
 message CreateOrModifyDestinationGroupRequest
 {
-   // Id of the group to modify or create if it does not exist.
-   required string destination_group_id = 1;
+  // Id of the group to modify or create if it does not exist.
+  required string destination_group_id = 1;
 
-   // Destination list to remove from the group.
-   // Destinations that are not found among the existing ones are ignored.
-   // Removing is done prior destination adding by destination_to_add parameter.
-   // Destinations are identified by the following set of parameters:
-   // (device_token, app_id) for ApplePushNotif,
-   // (registration_token, sender_id) for GooglePushNotif,
-   // (recipients) for EmailNotif,
-   // (phone_number) for SmsNotif.
-   optional shared_1.Destination destination_to_remove = 2;
+  // Destination to remove from the group.
+  // If it is not found among the existing ones, it is ignored.
+  // Destination is identified by the following set of parameters:
+  // (device_token, app_id) for ApplePushNotif,
+  // (registration_token, sender_id) for GooglePushNotif,
+  // (recipients) for EmailNotif,
+  // (phone_number) for SmsNotif.
+  // Note: either this or destination_to_add_or_update field must be specified.
+  optional shared_1.Destination destination_to_remove = 2;
 
-   // Destination list to add or update in the group.
-   // Existing members in the group referring the same destination will be overwritten.
-   // See comment of destination_to_remove field of how destinations are identified.
-   optional shared_1.Destination destination_to_add_or_update = 3;
+  // Destination to add or update in the group.
+  // Existing member in the group referring the same destination will be overwritten.
+  // See comment of destination_to_remove field of how destinations are identified.
+  optional shared_1.Destination destination_to_add_or_update = 3;
 }
 
 // Result of create or modify destination group operation.
 message CreateOrModifyDestinationGroupResult
-{
-}
-
-// Delete a destination group.
-message DeleteDestinationGroupRequest
-{
-   // Id of the group to delete.
-   required string destination_group_id = 1;
-}
-
-// Result of delete destination group operation.
-message DeleteDestinationGroupResult
 {
 }
 
@@ -306,17 +809,43 @@ message DestinationGroupListRequest
 // Result of list destination group operation.
 message DestinationGroupListResult
 {
-   // List of available destination groups.
-   repeated DestinationGroup destination_group = 1;
+  // List of available destination groups.
+  repeated DestinationGroup destination_groups = 1;
 }
 
 // Group of destinations.
 // Multiple rules can have the same destination group. A group can be modified independently on rules which using it.
 message DestinationGroup
 {
-   // Id of the group.
-   required string destination_group_id = 1;
+  // Id of the group.
+  required string destination_group_id = 1;
 
-   // List of destinations in the group.
-   repeated shared_1.Destination destination = 2;
+  // List of destinations in the group.
+  repeated shared_1.Destination destinations = 2;
+}
+
+// Update destination expiration time.
+// The request must be sent regularly (e.g., daily, after logon) for current user's device.
+// The request should be sent before or together with request that adds the destination to a rule or destination group.
+// Destination expiration time is set to 2 months by default (configurable) after receiving the request.
+// When destination expires, the server deletes it from rules and destination groups:
+//  * If the list of actions in a rule becomes emtpy, the server deletes the rule;
+//  * If a destination group becomes empty, the server leaves it as is.
+// Thus, the server never deletes a rule that has a destination group (including empty group)
+// or a destination that does not expire (e.g., email_notif or profile_sms_notif).
+message UpdateDestinationExpirationTimeRequest
+{
+  oneof destination
+  {
+    // APN destination (for iOS devices).
+    shared_1.ApplePushNotif apple_push_notif = 1;
+
+    // GCM destination (for Android devices).
+    shared_1.GooglePushNotif google_push_notif = 2;
+  }
+}
+
+// Result of update destination expiration time operation.
+message UpdateDestinationExpirationTimeResult
+{
 }

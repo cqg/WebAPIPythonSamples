@@ -3,6 +3,7 @@ syntax = "proto2";
 
 package account_authorization_2;
 
+import "WebAPI/user_session_2.proto";
 import "common/shared_1.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -10,6 +11,8 @@ import "google/protobuf/timestamp.proto";
 // Only one request per account is allowed for simultaneous processing.
 
 // Account level Logon Request. One-step logon procedure.
+// Note: it is deprecated. Use multi-step account logon procedure instead
+// (see AccountLogonRoutineClient / AccountLogonRoutineServer).
 message AccountLogon
 {
   // Account ID in CQG trade routing system.
@@ -23,6 +26,8 @@ message AccountLogon
 }
 
 // Account level Logon result.
+// Note: it is deprecated. Use multi-step account logon procedure instead
+// (see AccountLogonRoutineClient / AccountLogonRoutineServer).
 message AccountLogonResult
 {
   // Account ID in CQG trade routing system.
@@ -128,4 +133,111 @@ message AccountLogoffResult
 
   // Time when the message was sent.
   required google.protobuf.Timestamp server_utc_timestamp = 4;
+}
+
+// Message for multi-step account level logon.
+// Multi-step account level logon sequence has the following steps:
+//      1) Client initiates logon negotiation by sending 
+//         AccountLogonRoutineClient.logon_init message to the server.
+//      2) Server sends one or more AccountLogonRoutineServer.password_requests messages
+//         (this step may repeat after step #3).
+//      3) Client sends list of AccountLogonRoutineClient.password_responses back to the
+//         server.
+//      4) Server sends AccountLogonRoutineServer.logon_result as the final message of
+//         the negotiation.
+// Client may stop the negotiation by sending AccountLogonRoutineClient.abort_logon
+// message in response to any server AccountLogonRoutineServer.password_requests
+// message.
+// NOTE: only one of logon_init, password_responses and abort_logon fields has to be
+// specified.
+message AccountLogonRoutineClient
+{
+  // Account ID in CQG trade routing system.
+  // This is a required field.
+  optional sint32 account_id = 1;
+
+  // Initiating of multi-step account level logon process by client.
+  optional AccountLogonInit logon_init = 2;
+
+  // List of passwords in response to request from server.
+  // The number of passwords in response should be equal to the number of passwords in request from server.
+  repeated user_session_2.PasswordResponse password_responses = 3;
+
+  // Aborting of multi-step account level logon process by client.
+  optional user_session_2.AbortRoutine abort_logon = 4;
+}
+
+// Initiating of account level multi-step logon process by client.
+// Note: unlike user_session_2.LogonInit used for trader logon, we do not assume that
+// user_name is required for account level logon. Where required, server will request it
+// via AccountLogonRoutineServer.password_requests with password_type=PASSWORD_TYPE_TEXT
+// and user_prompt_type=user_name.
+message AccountLogonInit
+{
+}
+
+// Response to the AccountLogonRoutineClient message.
+// Only one of logon_result and password_requests fields is specified.
+// Note that most messages are shared with multi-step logon, though not all options may
+// be available when used with multi-step account level logon.
+message AccountLogonRoutineServer
+{
+  // Account ID in CQG trade routing system.
+  // This is a required field.
+  optional sint32 account_id = 1;
+
+  // Final message of the negotiation with the results.
+  optional user_session_2.LogonResult logon_result = 2;
+
+  // List of requested passwords.
+  repeated user_session_2.PasswordRequest password_requests = 3;
+}
+
+// Message for multi-step account level password change.
+// Multi-step account level password change sequence has the following steps:
+//      1) Client initiates account level password change procedure by sending
+//         AccountPasswordChangeRoutineClient.init_password_change to the server.
+//      2) Server sends one or more AccountPasswordChangeRoutineServer.password_requests
+//         messages (this step may repeat after step #3).
+//      3) Client sends list of AccountPasswordChangeRoutineClient.password_responses
+//         back to the server.
+//      4) Server sends AccountPasswordChangeRoutineServer.password_change_result
+//         as the final message of the negotiation with the results.
+//         Client may stop the negotiation by sending
+//         AccountPasswordChangeRoutineClient.abort_password_change message in response
+//         to any server AccountPasswordChangeRoutineServer.password_request message.
+// NOTE: only one of init_password_change, password_responses and abort_password_change
+// fields has to be specified.
+message AccountPasswordChangeRoutineClient
+{
+  // Account ID in CQG trade routing system.
+  // This is a required field.
+  optional sint32 account_id = 1;
+
+  // True means user has decided to initiate password changing procedure.
+  optional bool init_password_change = 2;
+
+  // List of passwords in response to request from server.
+  // The number of passwords in response should be equal to the number of passwords in request from server.
+  repeated user_session_2.PasswordResponse password_responses = 3;
+
+  // Aborting of multi-step password change process by client.
+  optional user_session_2.AbortRoutine abort_password_change = 4;
+}
+
+// Response to the AccountPasswordChangeRoutineClient message.
+// Only one of password_requests and password_change_result fields is specified.
+// Note that most messages are shared with multi-step logon, though not all options may
+// be available when used with multi-step account level logon.
+message AccountPasswordChangeRoutineServer
+{
+  // Account ID in CQG trade routing system.
+  // This is a required field.
+  optional sint32 account_id = 1;
+
+  // List of requested passwords.
+  repeated user_session_2.PasswordRequest password_requests = 2;
+
+  // Final message of the negotiation with the results.
+  optional user_session_2.PasswordChangeResult password_change_result = 3;
 }

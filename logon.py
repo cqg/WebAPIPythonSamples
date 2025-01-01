@@ -13,9 +13,9 @@ host_name = 'wss://demoapi.cqg.com:443'
 user_name = ''
 password = ''
 
-def logon(user_name, password, 
-          client_app_id='WebApiTest', client_version='python-client-test-2-87',
-          protocol_version_major=2,protocol_version_minor = 87):
+def logon(client, user_name, password, 
+          client_app_id='WebApiTest', client_version='python-client-test-2-230',
+          protocol_version_major=2,protocol_version_minor = 230):
     # create a client_msg based on the protocol.
     client_msg = ClientMsg()
     # initialize the logon message, there are four required parameters.
@@ -38,11 +38,23 @@ def logon(user_name, password,
         # the text_message contains the reason why user cannot login.
         raise Exception("Can't login: " + server_msg.logon_result.text_message)
 
+def logoff(client):
+    client_msg = ClientMsg()
+    logoff = client_msg.logoff
+    logoff.text_message = "logoff test"
+    client.send_client_message(client_msg)
+    server_msg = client.receive_server_message()
+    if server_msg.logged_off:
+        print("Logoff :)")
+    if server_msg.logged_off.text_message:
+        print("Logoff reason is: " + server_msg.logged_off.logoff_reason)
+
 if __name__ == "__main__":
     # see WebApiClient() class in webapi_client.py in line 5.
     client = webapi_client.WebApiClient()
     # see connect() function in webapi_client.py in line 16.
     client.connect(host_name)
-    logon(user_name, password)
+    logon(client, user_name, password)
     # see disconnect() function in webapi_client.py in line 19.
+    logoff(client)
     client.disconnect()

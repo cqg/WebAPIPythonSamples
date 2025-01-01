@@ -84,7 +84,40 @@ message ContributorParameters
   required string contributor_id = 1;
 
   // List of custom parameters.
-  repeated shared_1.NamedValue parameters = 2;
+  repeated ContributorParameter parameters = 2;
+}
+
+enum ContributorParameterSource
+{
+  CONTRIBUTOR_PARAMETER_SOURCE_UNSPECIFIED = 0;
+
+  // Origin of a parameter is a contract.
+  CONTRIBUTOR_PARAMETER_SOURCE_CONTRACT = 1;
+
+  // Origin of a parameter is a security.
+  CONTRIBUTOR_PARAMETER_SOURCE_SECURITY = 2;
+}
+
+message ContributorParameter
+{
+  // Contributor parameter name.
+  required string name = 1;
+
+  // Contributor parameter value.
+  optional string value = 2;
+
+  // An optional "deleted" flag for update operations.
+  optional bool deleted = 3;
+
+  // Contributor parameters are available on contract and security levels.
+  // This field specifies where the value (see ContributorParameter.value
+  // field) came from.
+  // Contract source has a priority over security. Different requests
+  // (which require different entitlements) control value on different
+  // levels.
+  // The field has meaning only in server to client messages.
+  // This field is associated with ContributorParameterSource enum.
+  optional uint32 source = 4;
 }
 
 // Get security level parameters.
@@ -138,10 +171,6 @@ message PublishContract
   // Security identifier for which contract is created. Unmodifiable.
   optional string security_id = 1;
 
-  // Contract's maturity date.
-  // (local exchange date in time format, use date part only).
-  optional sint64 maturity_date = 2;
-
   // Contract trading date for derivatives
   // (local exchange date in time format, use date part only).
   optional sint64 last_trading_date = 3;
@@ -193,9 +222,16 @@ message PublishContract
   // Leave this field empty if SecurityMetadata.currency_hedge_instrument_group_name is not set.
   optional uint32 currency_hedge_contract_id = 13;
 
+  // Identifier of the contract used for hedging.
+  // Can be different from source contract only if 'HedgeFirst' contributor parameter is explicitly set to false.
+  // If not set, it is assumed to be the same as source contract.
+  optional uint32 hedge_with_contract_id = 14;
+
   // Identifiers of fields being cleared.
   // E.g. To clear first_notice_date field, put 5 in this collection.
   repeated uint32 cleared_fields = 11;
+
+  reserved 2;
 }
 
 // Result of contract publishing.

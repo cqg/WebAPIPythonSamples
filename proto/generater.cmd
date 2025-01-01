@@ -1,5 +1,6 @@
 call protoc.exe --python_out=..\ WebAPI\account_authorization_2.proto
 call protoc.exe --python_out=..\ WebAPI\api_limit_2.proto
+call protoc.exe --python_out=..\ WebAPI\economic_calendar_2.proto
 call protoc.exe --python_out=..\ WebAPI\historical_2.proto
 call protoc.exe --python_out=..\ WebAPI\instrument_definition_2.proto
 call protoc.exe --python_out=..\ WebAPI\market_data_2.proto

@@ -3,42 +3,36 @@ from WebAPI.webapi_2_pb2 import *
 
 
 class WebApiClient:
-    def __init__(self, need_to_log=True):
+    def __init__(self, need_to_log=True, connected=False):
         self._need_to_log = need_to_log
-        self._connection = None
+        self._connected = connected
+        self.websocket_client = websocket.WebSocket()
 
     def __del__(self):
-        self.disconnect()
+        if self._connected:
+            self.disconnect()
 
-    def connection(self):
-        return self._connection
-
-    def connect(self, url, timeout=1000000.0):
-        self._connection = websocket.create_connection(url, timeout)
+    def connect(self, url):
+        self.websocket_client.connect(url)
 
     def disconnect(self):
-        if self._connection:
-            self._connection.close()
+        self.websocket_client.close()
+        self._connected = False
+        print("Disconnect by request\n")
 
     def send_client_message(self, client_msg):
-        self._connection.send(client_msg.SerializeToString(), websocket.ABNF.OPCODE_BINARY)
+        self.websocket_client.send(client_msg.SerializeToString())
         if self._need_to_log:
             print("Client message sent:\n" + str(client_msg))
 
     def send_partial_client_message(self, client_msg):
-        self._connection.send(client_msg.SerializePartialToString(), websocket.ABNF.OPCODE_BINARY)
+        self._connection.send(client_msg.SerializePartialToString())
         if self._need_to_log:
             print("Incomplete client message sent:\n" + str(client_msg))
 
     def receive_server_message(self):
         server_msg = ServerMsg()
-        opcode, data = self._connection.recv_data()
-        if opcode == websocket.ABNF.OPCODE_TEXT:
-            raise Exception("Received unexpected text message from WebAPI server")
-        elif opcode == websocket.ABNF.OPCODE_CLOSE:
-            raise websocket.WebSocketConnectionClosedException(
-                "Can't receive message - WebAPI server closed connection")
-
+        data = self.websocket_client.recvmsg()
         server_msg.ParseFromString(data)
 
         if self._need_to_log:

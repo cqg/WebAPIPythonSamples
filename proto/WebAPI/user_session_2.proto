@@ -152,9 +152,15 @@ message Logon
 
   // Client's device model (specific names for mobile, like "iPhone 7", or "PC" if not mobile/tablet).
   optional string device_model = 18;
+
+  // Hidden fields, not needed for normal operation.
+  extensions 300;
 }
 
-// Result of the logon operation (for Logon and LogonRoutineClient messages).
+// Result of the logon operation.
+// This is a common message used in both trader-level (LogonRoutineServer) and
+// account-level (AccountLogonRoutineServer) multi-step logon sequences as well
+// as in the single step logon.
 message LogonResult
 {
   enum ResultCode
@@ -198,6 +204,7 @@ message LogonResult
   required string base_time = 2;
 
   // Token of a new session if logon succeeded.
+  // Filled only for trader level logon procedure.
   optional string session_token = 3;
 
   // Optional logon result message for failure details.
@@ -329,6 +336,10 @@ message LogonInit
 }
 
 // Parameters of requesting password from user.
+// This is a common message used in both trader-level (LogonRoutineServer,
+// PasswordChangeRoutineServer) and account-level
+// (account_authorization_2.AccountLogonRoutineServer,
+// AccountPasswordChangeRoutineServer) multi-step logon and password change sequences.
 message PasswordRequest
 {
   enum PasswordType
@@ -374,9 +385,25 @@ message PasswordRequest
   // Set of supported encodings for this request.
   // Client should choose the encoding with highest priority from among those it implements.
   repeated Encoding encodings = 6;
+
+  // Tells client whether server supports client-controlled, optional storage of this
+  // password value for use in future logons. If true, and client wants the value it
+  // submits to be stored by the server (it can either prompt user to decide, or decide
+  // automatically), then client should set corresponding PasswordResponse.store=true.
+  // Only sent during logon sequence, not during password change sequence.
+  optional bool can_store_password = 7;
+
+  // Tells client whether server currently has a stored value for this password.
+  // Can only be true if can_store_password is also true.
+  // Only sent during logon sequence, not during password change sequence.
+  optional bool password_is_stored = 8;
 }
 
 // Response to the PasswordRequest message.
+// This is a common message used in both trader-level (LogonRoutineClient,
+// PasswordChangeRoutineClient) and account-level
+// (account_authorization_2.AccountLogonRoutineClient,
+// AccountPasswordChangeRoutineClient) multi-step logon and password change sequences.
 message PasswordResponse
 {
   // ID of corresponding password request.
@@ -386,7 +413,21 @@ message PasswordResponse
   required string encoding_type = 2;
 
   // User's password encoded with specified encoding method.
-  required string password = 3;
+  // Note: server ignores this attribute when use_stored=true.
+  optional string password = 3;
+
+  // True means ignore the value supplied in password and use the server's
+  // stored value instead. Note: client should only send when corresponding
+  // PasswordRequest.password_is_stored=true.
+  optional bool use_stored = 4;
+
+  // True means client requests server to store this password value for use in future
+  // logons, overwriting any existing stored value. False or empty means client requests
+  // server to use this password value only for this login AND to clear any
+  // existing stored value. Note: client should only send when corresponding
+  // PasswordRequest.can_store_password=true.
+  // Server ignores this attribute when use_stored=true.
+  optional bool store = 5;
 }
 
 // Description of the encoding method.

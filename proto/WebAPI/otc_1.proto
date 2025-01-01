@@ -54,6 +54,28 @@ message OtcRequest
   // Request balance item links for specific item.
   // Request rate is limited, 100 requests per 100 seconds by default.
   optional BalanceItemsLinksRequest balance_items_links_request = 9;
+
+  // TailManagement configuration subscription.
+  // Number of simultaneous requests with subscription for updates is limited,
+  // 1 by default.
+  // Deprecated. Use tail_management_configuration_subscription_2 instead.
+  optional TailManagementConfigurationSubscription tail_management_configuration_subscription = 10 [deprecated = true];
+
+  // Request to update tail management configuration.
+  // Request rate is limited, 10 requests per 100 seconds by default.
+  optional UpdateTailManagementConfiguration update_tail_management_configuration = 11;
+
+  // Request to get tail management configuration as string in ATDL format.
+  // Request rate is limited, 10 requests per 100 seconds by default.
+  optional RequestTailManagementConfigurationMetadata request_tail_management_configuration_metadata = 12;
+
+  // TailManagement configuration subscription.
+  // Number of simultaneous requests with subscription for updates is limited,
+  // 1 by default.
+  optional TailManagementConfigurationSubscription2 tail_management_configuration_subscription_2 = 14;
+
+  reserved 13;
+  reserved "reset_custom_basis_request";
 }
 
 // OTC/WebAPI responses.
@@ -100,6 +122,9 @@ message OtcReport
 
     // Request is timed out.
     STATUS_CODE_TIMEOUT = 107;
+
+    // Request with same request_id already in use.
+    STATUS_CODE_DUPLICATE = 108;
   }
 
   // ID of a corresponding request or subscription.
@@ -135,6 +160,22 @@ message OtcReport
 
   // Balance item links for requested item.
   optional BalanceItemsLinksResult balance_items_links_result = 11;
+
+  // Tail management configuration report.
+  // Deprecated. Replaced by tail_management_configuration_report_2.
+  optional TailManagementConfigurationReport tail_management_configuration_report = 12 [deprecated = true];
+
+  // Tail management metadata in ATDL format as string.
+  optional TailManagementConfigurationMetadata tail_management_configuration_metadata = 13;
+
+  // Update tail management configuration result.
+  optional UpdateTailManagementConfigurationResult update_tail_management_configuration_result = 14;
+
+  // Tail management configuration report.
+  optional TailManagementConfigurationReport2 tail_management_configuration_report_2 = 16;
+
+  reserved 15;
+  reserved "reset_custom_basis_result";
 }
 
 ////------------------------------------------
@@ -164,6 +205,16 @@ message HedgeBalanceKey
 
   // Reserved for internal use.
   extensions 100 to 199;
+}
+
+// Contract group key. It's not necessarily same as ContractMetadata.instrument_group_name.
+message GroupKey
+{
+  // Hedge Account ID in CQG trade routing system.
+  optional sint32 account_id = 1;
+
+  // Group name.
+  optional string group_symbol = 2;
 }
 
 // OTC instances subscription.
@@ -222,6 +273,9 @@ message HedgeBooksReport
 
   // List of archived hedge balance details.
   repeated ArchivedHedgeBalanceDetails archived_hedge_balance_details = 4;
+
+  // Group balance details.
+  repeated GroupBalanceDetails group_balance_details = 5;
 }
 
 message HedgeBalanceDetails
@@ -244,8 +298,28 @@ message HedgeBalanceDetails
   // Full contract symbol.
   optional string contract_symbol = 5;
 
-  // Name of units for balance values in this message
+  // Name of units for balance values in this message.
   optional shared_1.Text units_name = 6;
+
+  // Contract group name, e.g. commodity.
+  optional string contract_group_name = 7;
+}
+
+message GroupBalanceDetails
+{
+  // Group key.
+  optional GroupKey group_key = 1;
+
+  // Deleted flag is used in updates when entity is removed.
+  // Only group_key will be provided in this case.
+  optional bool deleted = 2;
+
+  // Current hedge balance in units. If missing - hedge balance is not changed
+  // since last update.
+  optional cqg.Decimal hedge_balance = 3;
+
+  // Name of units for balance values in this message.
+  optional shared_1.Text units_name = 4;
 }
 
 // Hedge book details subscription.
@@ -282,102 +356,14 @@ message HedgeBookDetailsReport
   // If true - then this message mean last part of multi-parted snapshot.
   optional bool is_last_part = 2;
 
-  // List of cash orders.
-  // Deprecated. Use balance_items instead.
-  repeated CashOrderDetails cash_order_details = 3 [deprecated = true];
-
-  // List of hedge orders.
-  // Deprecated. Use balance_items instead.
-  repeated HedgeOrderDetails hedge_order_details = 4 [deprecated = true];
-
-  // List of links between cash and hedge orders.
-  // Only one link between particular cash and hedge orders may exist.
-  // Deprecated. Use items_links instead.
-  repeated CashToHedgeOrdersLink cash_to_hedge_orders_links = 5 [deprecated = true];
-
   // List of balance items: Cash, Hedge and BalanceOffset
   repeated BalanceItem balance_items = 6;
 
   // List of links between any type of BalanceItem.
   repeated BalanceItemsLink items_links = 7;
-}
 
-// Cash order details.
-// [deprecated] use BalanceItem instead.
-message CashOrderDetails
-{
-  // Order ID assigned by server to originally placed order.
-  optional string chain_order_id = 1;
-
-  // Deleted flag is used in updates when entity is removed.
-  // Only chain_order_id will be provided in this case.
-  optional bool deleted = 2;
-
-  // Account ID in CQG trade routing system.
-  optional sint32 account_id = 3;
-
-  // Server side contract id.
-  optional uint32 contract_id = 4;
-
-  // Time when order added to hedge balance.
-  optional google.protobuf.Timestamp hedge_utc_timestamp = 5;
-
-  // Total order size in units.
-  optional cqg.Decimal units = 6;
-
-  // Name of units for order size value in this message.
-  optional shared_1.Text units_name = 7;
-
-  // Reserved for internal use.
-  extensions 100 to 199;
-}
-
-// Hedge order details.
-// [deprecated] use BalanceItem instead.
-message HedgeOrderDetails
-{
-  // Order ID assigned by server to originally placed order.
-  optional string chain_order_id = 1;
-
-  // Deleted flag is used in updates when entity is removed.
-  // Only chain_order_id will be provided in this case.
-  optional bool deleted = 2;
-
-  // Time when hedge order placed.
-  optional google.protobuf.Timestamp hedge_utc_timestamp = 3;
-
-  // Total order size in units.
-  optional cqg.Decimal units = 4;
-
-  // Quantity open for further execution in units.
-  optional cqg.Decimal open_units = 5;
-
-  // Name of units for order size values in this message
-  optional shared_1.Text units_name = 6;
-}
-
-// Cash to hedge orders link.
-// [deprecated] use BalanceItemsLink instead.
-message CashToHedgeOrdersLink
-{
-  // Deleted flag is used in updates when entity is removed.
-  // Only link_id will be provided in this case.
-  optional bool deleted = 1;
-
-  // Time when link created.
-  optional google.protobuf.Timestamp link_utc_timestamp = 2;
-
-  // Cash order ID.
-  optional string cash_order_id = 3;
-
-  // Hedge Order ID.
-  optional string hedge_order_id = 4;
-
-  // Hedge size covered by this link in units.
-  optional cqg.Decimal link_units = 5;
-
-  // Name of units for hedge size values in this message
-  optional shared_1.Text units_name = 6;
+  reserved 3 to 5;
+  reserved "cash_order_details", "hedge_order_details", "cash_to_hedge_orders_links";
 }
 
 // Key that uniquely identifies each BalanceItem.
@@ -615,4 +601,144 @@ message BalanceItemsLinksResult
 
   // Links for requested item.
   repeated BalanceItemsLink items_links = 2;
+}
+
+// Update tail management configuration result.
+message UpdateTailManagementConfigurationResult
+{
+}
+
+// Subscribe on Tail Management Configuration updates.
+// Deprecated. Use TailManagementConfigurationSubscription2 instead.
+message TailManagementConfigurationSubscription
+{
+  // If set to true - subscribe to changes, if false - drop subscription.
+  optional bool subscribe = 1 [default = true];
+
+  // OTC instance id.
+  optional uint32 otc_instance_id = 2;
+}
+
+// Subscribe on Tail Management Configuration updates.
+message TailManagementConfigurationSubscription2
+{
+  // If set to true - subscribe to changes, if false - drop subscription.
+  optional bool subscribe = 1 [default = true];
+
+  // OTC instance id.
+  optional uint32 otc_instance_id = 2;
+}
+
+// Request to update Tail Management Configuration.
+message UpdateTailManagementConfiguration
+{
+  // OTC instance id.
+  optional uint32 otc_instance_id = 1;
+
+  // New tail management configuration.
+  repeated TailManagementConfiguration tail_management_configurations = 2;
+
+  // New group tail management configurations.
+  repeated GroupTailManagementConfiguration group_tail_management_configurations = 3;
+}
+
+// Message sent to subscribers about Tail Management Configuration change.
+// Deprecated. TailManagementConfigurationReport2 will be used instead for TailManagementConfigurationSubscription2.
+message TailManagementConfigurationReport
+{
+  // True if this is a snapshot (all previously known configuration data
+  // about this contract and account should be cleaned).
+  // False used for incremental updates.
+  // Snapshot will be sent only once after subscription. May be sent in multiple
+  // parts. Each part will have this field set to true. False by default.
+  optional bool is_snapshot = 1;
+
+  // If true - then this message means last part of multi-parted snapshot.
+  optional bool is_last_part = 2;
+
+  // Contract level tail management configurations set by customer.
+  repeated TailManagementConfiguration tail_management_configurations = 3;
+}
+
+// Message sent to subscribers about Tail Management Configuration change.
+// If configuration on group level is overridden, configuration on symbol level is ignored.
+message TailManagementConfigurationReport2
+{
+  // True if this is a snapshot (all previously known configuration data
+  // about this contract and account should be cleaned).
+  // False used for incremental updates.
+  // Snapshot will be sent only once after subscription. May be sent in multiple
+  // parts. Each part will have this field set to true. False by default.
+  optional bool is_snapshot = 1;
+
+  // If true - then this message means last part of multi-parted snapshot.
+  optional bool is_last_part = 2;
+
+  // Contract level tail management configurations set by customer.
+  repeated TailManagementConfiguration tail_management_configurations = 3;
+
+  // Default contract level configuration taken from OTC configuration.
+  optional TailManagementConfiguration default_tail_management_configuration = 4;
+
+  // Group level tail management configurations set by customer.
+  repeated GroupTailManagementConfiguration group_tail_management_configurations = 5;
+
+  // Default group level configurations taken from OTC configuration.
+  optional GroupTailManagementConfiguration default_group_tail_management_configuration = 6;
+}
+
+message RequestTailManagementConfigurationMetadata
+{
+   // OTC instance id.
+   optional uint32 otc_instance_id = 1;
+}
+
+// Metadata to describe Tail Management Configuration.
+message TailManagementConfigurationMetadata
+{
+  // ATDL XML schema used to describe parameters metadata and layout.
+  optional string metadata = 1;
+
+  // ATDL XML schema used to describe parameters metadata and layout for contract groups.
+  optional string group_metadata = 2;
+}
+
+// Describe Tail Management Configuration per Hedge Account Balance.
+message TailManagementConfiguration
+{
+  // Hedge balance keys.
+  // OTC instance default configuration can be specified by omitting hedge_balance_keys.balance_contract_symbol and
+  // hedge_balance_keys.account_id.
+  // Account level default can be specified by omitting hedge_balance_keys.balance_contract_symbol.
+  repeated HedgeBalanceKey hedge_balance_keys = 1;
+
+  // If set to true – OTC shall remove this configuration from cache.
+  optional bool removed = 2;
+
+  repeated ConfigurationEntry configuration_entries = 3;
+}
+
+// Describe Tail Management Configuration per contract group.
+message GroupTailManagementConfiguration
+{
+  // Group keys.
+  // OTC instance default configuration can be specified by omitting group_keys.group_symbol and group_keys.account_id.
+  // Account level default can be specified by omitting group_keys.group_symbol.
+  repeated GroupKey group_keys = 1;
+
+  // If set to true – OTC shall remove this configuration from cache.
+  optional bool removed = 2;
+
+  repeated ConfigurationEntry configuration_entries = 3;
+}
+
+// Pair of configuration name with its value.
+message ConfigurationEntry
+{
+  // If set to true – OTC shall remove this parameter from cache and take default.
+  optional bool removed = 1;
+
+  optional string name = 2;
+
+  optional string value = 3;
 }

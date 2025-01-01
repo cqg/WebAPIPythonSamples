@@ -16,6 +16,18 @@ import "common/decimal.proto";
 // Maximum number of legs in the whole strategy:
 // - Synthetic strategies: 40;
 // - Exchange strategies: depends only on exchange.
+// Strategy trading operates with the node path
+// in the tree of the strategy from the root to a leg or nested strategy node.
+// The path is a string consisting of either StrategyDefinition.node_number or LegDefinition.node_number
+// at every level of the tree preceeded and separated by slash.
+// E.g.
+// "/" means the root strategy;
+// "/1" means the leg or nested strategy with node_number 1 of the root strategy;
+// "/1/2" means the leg or nested strategy with node_number 2 of a strategy S1,
+//        S1 is the strategy with node_number 1 of the root strategy,
+// "/1/2/2" means the leg with node_number 2 of a strategy S1,
+//          S1 is the strategy with node_number 2 of another strategy S2,
+//          S2 is the strategy with node_number 1 of the root strategy.
 message StrategyDefinition
 {
   // Using a fractional trade ratio may result in fractional lots. If so, the number of lots has to be rounded.
@@ -54,8 +66,14 @@ message StrategyDefinition
   // One of RoundLegMode enums, ROUND_LEG_MODE_DOWN is default. Ignored for aggregations and exchange strategies.
   optional uint32 round_leg_mode = 5;
 
-  // Unique node index within the root strategy to apply strategy trading parameters and to associate an order.
-  required uint32 node_index = 6;
+  // Note: use node_number instead.
+  // A client value is ignored, a unique server one is populated.
+  optional uint32 node_index = 6 [deprecated = true];
+
+  // Node number populated by server, unique between legs and nested strategies of the parent strategy,
+  // part of node_path field in order actions.
+  // Not set for the root strategy.
+  optional sint32 node_number = 10;
 
   // Legs or nested strategies.
   repeated StrategyNodeDefinition node_definitions = 7;
@@ -82,8 +100,13 @@ message LegDefinition
   // Note: in case of receiving unknown id the contract metadata can be obtained via ContractMetadataRequest.
   required uint32 contract_id = 1;
 
-  // Unique node index within the root strategy to apply strategy trading parameters and to associate an order.
-  required uint32 node_index = 2;
+  // Note: use node_number instead.
+  // A client value is ignored, a unique server one is populated.
+  optional uint32 node_index = 2 [deprecated = true];
+
+  // Node number populated by server, unique between legs and nested strategies of the parent strategy,
+  // part of node_path field in order actions.
+  optional sint32 node_number = 9;
 
   // Note: use qty_ratio field instead.
   // This field has precision 1e-12 and can have maximum value of 9223372.
@@ -105,10 +128,11 @@ message LegDefinition
   // 0 is default.
   optional double price_offset = 5;
 
-  // Price of covering future contract. For exchange strategy only.
+  // Price of covering future or equity contract. For exchange strategy only.
   optional double covering_price = 6;
 
-  // Used to calculate the quantity of futures covering the option or options strategy. For exchange strategy only.
+  // Used to calculate the quantity of equities or futures covering the option or options strategy.
+  // For exchange strategy only.
   // Note: only qty_ratio sign means side of the leg (buy if positive or sell if negative).
   optional cqg.Decimal option_delta = 7;
 }

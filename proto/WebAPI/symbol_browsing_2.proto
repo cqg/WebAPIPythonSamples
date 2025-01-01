@@ -5,13 +5,17 @@ syntax = "proto2";
 package symbol_browsing_2;
 
 import "WebAPI/metadata_2.proto";
-import "WebAPI/metadata_admin_2.proto";
-import "common/decimal.proto";
-import "common/shared_1.proto";
 
-// Symbol structure.
-// It can represent either a product, a security, a maturity or a contract.
-// So only one of corresponding *_metadata fields can be specified.
+// Symbol structure. 
+// It can represent either a product (root symbol), a security,
+// an option maturity or a contract (leaf symbol).
+// Only one of corresponding *_metadata fields can be specified.
+// Each symbol except product ones has a link to its parent
+// (see Symbol.parent_symbol_id field):
+// parent symbol for a security symbol is a product symbol,
+// parent symbol for a contract symbol (non-option) is a security symbol,
+// parent symbol of an option strike contract symbol is an option maturity symbol,
+// parent symbol for an option maturity symbol is a security symbol.
 message Symbol
 {
   // Symbol Identifier.
@@ -49,15 +53,15 @@ message Symbol
   // Deprecated and should not be used. Use nested metadata messages.
   optional string instrument_group_name = 10 [deprecated = true];
 
-  // ID of the parent symbol (if this is not the root symbol - product).
+  // ID (Symbol.id) of the parent symbol (if this is not the root symbol - product).
   // If this field is empty, product_metadata field is set.
   optional string parent_symbol_id = 11;
 
-  // List of categories of this symbol, if any.
+  // List of categories (SymbolCategory.id) of this symbol, if any.
   // See SymbolCategory and SymbolCategoryRequest messages.
   repeated string category_ids = 12;
 
-  // Deprecated and should not be used. Use SecurityMetadata.source_instrument_group_name or
+  // Deprecated and should not be used. Use metadata_2.SecurityMetadata.source_instrument_group_name or
   // ContractMetadata.source_contract_id instead.
   optional string source_symbol_id = 13 [deprecated = true];
 
@@ -69,7 +73,7 @@ message Symbol
   optional ProductMetadata product_metadata = 14;
 
   // Meta-data of a security if this symbol describes one (aka Symbol Prefix Key).
-  optional SecurityMetadata security_metadata = 15;
+  optional metadata_2.SecurityMetadata security_metadata = 15;
 
   // Meta-data of options maturity group if this symbol describes one (aka Option Lead Key).
   optional metadata_2.OptionMaturityMetadata option_maturity_metadata = 16;
@@ -93,7 +97,7 @@ message SymbolCategory
   // Category description.
   optional string description = 3;
 
-  // Category parent identifier. Omitted for root categories.
+  // Category parent identifier (SymbolCategory.id). Omitted for root categories.
   optional string parent_id = 4;
 
   // Indicates whether this category can be used as a filter for getting a list of symbols.
@@ -106,6 +110,14 @@ message SymbolCategory
   // If the category is a OTC contributor then this field defines contributor ID.
   optional string contributor_id = 7;
 
+  // If the category is an Asset Class then this field defines instrument business type id.
+  // To get a list of all instrument business type id values, send a SymbolCategoryListRequest
+  // with category_id corresponding to Asset Class, then for each id from SymbolCategoryListReport's
+  // symbol_categories field, send SymbolCategoryListRequest with this id as the value of category_id
+  // or send SymbolCategoryListRequest with a big enough depth parameter value (see SymbolCategoryListRequest.depth)
+  // in order to get all symbol categories.
+  optional uint32 instrument_business_type_id = 9;
+
   // Deleted flag is used in updates when the category is removed.
   optional bool deleted = 8;
 }
@@ -114,7 +126,7 @@ message SymbolCategory
 // A list of roots can be requested using an empty list of category IDs.
 message SymbolCategoryListRequest
 {
-  // Category Identifier to request corresponding sub-tree.
+  // Category Identifier (SymbolCategory.id) to request corresponding sub-tree.
   // Do not specify category ID to get categories from roots.
   optional string category_id = 1;
 
@@ -132,7 +144,7 @@ message SymbolCategoryListReport
 // Request for a specific category by ID.
 message SymbolCategoryRequest
 {
-  // Category Identifier to request corresponding category.
+  // Category Identifier (SymbolCategory.id) to request corresponding category.
   optional string category_id = 1;
 }
 
@@ -185,7 +197,8 @@ message SymbolCategoryListByInstrumentTypeReport
 // corresponding option maturity symbol is specified as a parent_symbol_id in the request.
 message SymbolListRequest
 {
-  // Optional category filter controlling how multiple symbol categories are applied in the filter.
+  // Optional category filter (SymbolCategory.id) controlling how multiple
+  // symbol categories are applied in the filter.
   // Categories within the same tree (having the same root) are applied by "OR" in the category filter
   // (e.g. two exchanges, either matches). Otherwise categories are applied by "AND" (e.g. exchange and asset).
   // See SymbolCategory and SymbolCategoryListRequest messages.
@@ -197,7 +210,7 @@ message SymbolListRequest
   // One level is returned if the field is omitted.
   optional uint32 depth = 2;
 
-  // Parent symbol id filter to return only child symbols of this parent.
+  // Parent symbol id (Symbol.id) filter to return only child symbols of this parent.
   // If this field is specified, depth must be one or omitted.
   optional string parent_symbol_id = 3;
 }
@@ -212,8 +225,12 @@ message SymbolListReport
 // Request for a specific symbol by ID.
 message SymbolRequest
 {
-  // ID of a symbol to request.
+  // ID (Symbol.id) of a symbol to request.
   required string symbol_id = 1;
+
+  // True if deleted symbols should also be reported.
+  // Note that symbol marked as deleted will be available for 30 days (by default) from its last trading date.
+  optional bool include_deleted = 2;
 }
 
 // Report with a symbol.
@@ -227,80 +244,6 @@ message ProductMetadata
   optional string product_id = 1;
 }
 
-// Metadata used for real-time and trading data processing for a group of contracts.
-// Note that for some contracts tick_size, tick_value or contract_size_in_units values on
-// ContractMetadata level might differ from corresponding values in ProcessingMetadata
-// (e.g., tick_size and tick_value for VTS contracts or contract_size_in_units for some option contracts).
-// In these cases ContractMetadata values should be used.
-message ProcessingMetadata
-{
-  // Currency code (ISO 4217 based).
-  optional string currency = 1;
-
-  // Size or a single market tick in correct price format.
-  optional double tick_size = 2;
-
-  // Tick money value in corresponding currency. See ProcessingMetadata.currency.
-  optional double tick_value = 3;
-
-  // Contract size in the number of units (where defined). Unit is defined by contract_size_unit field.
-  optional cqg.Decimal contract_size_in_units = 4;
-
-  // Unit label for the contract size.
-  optional shared_1.Text contract_size_unit = 5;
-
-  // Security whose contracts should be used to fill PublishContract.currency_rate_contract_id.
-  // Use InstrumentGroupRequest to query contracts by group name.
-  optional string currency_rate_instrument_group_name = 6;
-
-  // Security whose contracts should be used to fill PublishContract.currency_hedge_contractd_id.
-  // Use InstrumentGroupRequest to query contracts by group name.
-  optional string currency_hedge_instrument_group_name = 7;
-}
-
-message SecurityMetadata
-{
-  optional string security_id = 1;
-
-  // CFI code (Classification of Financial Instruments, ISO 10962).
-  optional string cfi_code = 2;
-
-  // Deprecated and should not be used. Use ProcessingMetadata.currency instead.
-  optional string currency = 3 [deprecated=true];
-
-  // Deprecated and should not be used. Use ProcessingMetadata.tick_size instead.
-  optional double tick_size = 4 [deprecated=true];
-
-  // Deprecated and should not be used. Use ProcessingMetadata.tick_value instead.
-  optional double tick_value = 5 [deprecated=true];
-
-  // Deprecated and should not be used.
-  optional uint32 period_type = 6 [deprecated=true];
-
-  // Deprecated and should not be used.
-  optional uint32 period_value = 7 [deprecated=true];
-
-  // Deprecated and should not be used. Use ProcessingMetadata.contract_size_in_units instead.
-  optional cqg.Decimal contract_size_in_units = 8 [deprecated=true];
-
-  // Deprecated and should not be used. Use ProcessingMetadata.contract_size_unit instead.
-  optional shared_1.Text contract_size_unit = 9 [deprecated=true];
-
-  // Optional custom security parameters per associated OTC contributor (if any).
-  repeated metadata_admin_2.ContributorParameters contributor_parameters = 10;
-
-  // ID of the symbol the security represents (Symbol.id attribute).
-  optional string symbol_id = 11;
-
-  // If this security represents a list of double-quoted contracts, the field contains identifier
-  // to request list of corresponding source instruments (see InstrumentGroupRequest).
-  optional string source_instrument_group_name = 12;
-
-  // Metadata used for real-time and trading data processing. 
-  // There might be different metadata properties for different contracts within the security.
-  repeated ProcessingMetadata processing_metadata = 13;
-}
-
 // Request for a list of product symbols matching a search criteria (see Symbol.product_metadata).
 message ProductSearchRequest
 {
@@ -312,14 +255,14 @@ message ProductSearchRequest
   // I.e. it matches a symbol if any word from the search term matches.
   optional string search_term = 1;
 
-  // Optional category filter controlling how multiple symbol categories are applied in the filter.
+  // Optional category (SymbolCategory.id) filter controlling how multiple
+  // symbol categories are applied in the filter.
   // Categories within the same tree (having the same root) are applied by "OR" in the category filter
   // (e.g. two exchanges, either matches). Otherwise categories are applied by "AND" (e.g. exchange and asset).
   // See SymbolCategory and SymbolCategoryListRequest messages.
   repeated string category_ids = 2;
 
-  // Reserved field number (do not reuse).
-  optional bool reserved1 = 3;
+  reserved 3;
 }
 
 // Report with a list of found product symbols.

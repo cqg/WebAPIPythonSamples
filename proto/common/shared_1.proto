@@ -11,10 +11,10 @@ package shared_1;
 message Text
 {
    // Message unique key.
-   required string key = 1;
+   optional string key = 1;
 
    // Message text.
-   required string text = 2;
+   optional string text = 2;
 
    // Optional message format string which is sent only if a message has parameters.
    // Format is defined as a sample for localized clients to replace it with a translated version
@@ -241,6 +241,8 @@ message SignOnResult
 // Request for a list of entitlements of the current user.
 message EntitlementRequest
 {
+   // If true, add cryptographic signature to the responses.
+   optional bool sign_responses = 1;
 }
 
 // Report with a list of entitlements of the current user.
@@ -248,6 +250,9 @@ message EntitlementReport
 {
    // List of entitlements.
    repeated Entitlement entitlement = 1;
+
+   // Cryptographic signature.
+   optional bytes signature = 2;
 }
 
 message Entitlement
@@ -265,6 +270,9 @@ message Entitlement
        // Dow Jones news entitlement
        // The code points to DJ news feed.
        DJNEWS = 26;
+
+       // Studies.
+       STUDIES = 36;
 
        // Manage metadata on a security (prefix) level.
        // The code points to a contributor id.
@@ -284,6 +292,9 @@ message Entitlement
 
    // The code that depends on the type.
    required string entitlement_code = 2;
+
+   // Deleted flag is used in updates when entity is removed.
+   optional bool deleted = 3;
 }
 
 ////------------------------------------------
@@ -299,14 +310,20 @@ message Destination
    // APN destination (for iOS devices).
    optional ApplePushNotif apple_push_notif = 2;
 
-   // GCM destination (for Android devices), not supported yet.
+   // GCM destination (for Android devices).
    optional GooglePushNotif google_push_notif = 3;
 
    // Email destination.
    optional EmailNotif email_notif = 4;
 
+   // Notification to an email specified in trader's profile.
+   optional EmailFromProfileNotif profile_email_notif = 6;
+
    // SMS.
    optional SmsNotif sms_notif = 5;
+
+   // Sms notification to a phone number specified in trader's profile.
+   optional SmsToPhoneFromProfileNotif  profile_sms_notif = 7;
 }
 
 // Push notification for iOS devices.
@@ -319,7 +336,7 @@ message ApplePushNotif
    required string app_id = 2;
 }
 
-// Push notification for Android devices, not supported yet.
+// Push notification for Android devices.
 message GooglePushNotif
 {
    // registration token for Android device and app
@@ -346,11 +363,23 @@ message EmailNotif
    repeated string recipients = 1;
 }
 
+// Notification to an email specified in trader's profile
+// (to the first email in case there are multiple in the profile).
+message EmailFromProfileNotif
+{
+}
+
 // Sms notification.
 message SmsNotif
 {
    // Destination phone number.
    required string phone_number = 1;
+}
+
+// Sms notification to a phone number specified in trader's profile
+// (to the first phone number in case there are multiple in the profile).
+message SmsToPhoneFromProfileNotif
+{
 }
 
 

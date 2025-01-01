@@ -1,0 +1,228 @@
+// Calendar events.
+
+syntax = "proto2";
+
+package economic_calendar_2;
+
+import "google/protobuf/timestamp.proto";
+
+// Value related to calendar event.
+message CalendarEventValue
+{
+  // Real (not scaled) value.
+  optional double value = 1;
+
+  // Unit in which the value has been reported.
+  // Example of values:
+  // 1. '%': percentages.
+  // 2. 'K': 10^3
+  // 3. 'M': 10^6
+  // 4. 'B': 10^9
+  // 5. 'T': 10^12
+  optional string unit = 2;
+
+  // Full contract symbol in CQG dialect.
+  optional string cqg_contract_symbol = 3;
+
+  // Contract ID of instrument associated with this value.
+  // Note: in case of receiving unknown id the contract metadata can be obtained via
+  // metadata_2.ContractMetadataRequest.
+  optional uint32 contract_id = 4;
+
+  // Proposed bar unit for TimeBarRequest.
+  // This field is associated with BarUnit enum type.
+  optional uint32 time_bar_unit = 5;
+}
+
+// Detail of calendar event.
+message CalendarEventDetail
+{
+  // Provider event detail ID.
+  // Note: The tuple of {country_id, provider_id, provider_event_category_id, provider_event_detail_id} can be used
+  // for filtering of similar detail of calendar event.
+  optional string provider_event_detail_id = 1;
+
+  // Description.
+  optional string description = 2;
+
+  // Expected value of the event.
+  optional CalendarEventValue expected_value = 3;
+
+  // Actual value of the event.
+  optional CalendarEventValue actual_value = 4;
+
+  // Previous value of the Event.
+  optional CalendarEventValue previous_value = 5;
+
+  // Previous Revised value of the Event.
+  optional CalendarEventValue previous_revised_value = 6;
+}
+
+// Description of calendar event.
+message CalendarEvent
+{
+  // Provider ID.
+  // Metadata can be obtained via CalendarEventProviderListRequest.
+  optional sint32 provider_id = 1;
+
+  // Unique identifier of the calendar event.
+  // This is a required field.
+  optional string provider_event_id = 2;
+
+  // Time of this event (can be in the future).
+  optional google.protobuf.Timestamp event_utc_timestamp = 3;
+
+  // True means that event_utc_time is an exact time of the event,
+  // False means that only a date of the event is provided.
+  optional bool event_has_time = 4;
+
+  // Period for which the event was published. For example 'Q4'.
+  optional string period = 5;
+
+  // Description.
+  optional string description = 6;
+
+  // The Venue where the event will occur.
+  optional string venue = 7;
+
+  // A URL link to more information about the event.
+  optional string event_url = 8;
+
+  // The name of the company/organization the event refers to.
+  optional string organization_name = 9;
+
+  // The ticker symbol for the company if it's a company related event.
+  optional string organization_isin = 10;
+
+  // A URL with information about the company/organization.
+  optional string organization_url = 11;
+
+  // Collection of event details.
+  repeated CalendarEventDetail details = 12;
+
+  // True if it's key event.
+  // This is a required field.
+  optional bool is_key_event = 13;
+
+  // Country ID.
+  // Metadata can be obtained via CountryListRequest.
+  optional sint32 country_id = 14;
+
+  // True means that an actual update is expected when the event occurs.
+  optional bool actual_expected = 15;
+
+  // Provider event category ID.
+  // Note: The tuple of {country_id, provider_id, provider_event_category_id} can be used for filtering
+  // of similar events.
+  optional string provider_event_category_id = 16;
+}
+
+// Request for calendar events.
+// The server maintains a limited number of full calendar days (in UTC) of past events. The default is 65 days,
+// the actual limit is returned in the oldest available timestamp of the report.
+// Requested event time range is truncated to the oldest available timestamp.
+// For subscriptions, new or updated events are delivered if they are within the available range,
+// regardless of the from_ and to_utc_timestamp in the request.
+// Tip: to subscribe on new / updated events only (without receiving events for specified time range),
+// you can omit both 'from_utc_timestamp' and 'to_utc_timestamp' in the request.
+message CalendarEventListRequest
+{
+  // Time to start from.
+  // If not specified, then current time is used.
+  optional google.protobuf.Timestamp from_utc_timestamp = 1;
+
+  // Time to end with.
+  // If not specified, then current time is used.
+  optional google.protobuf.Timestamp to_utc_timestamp = 2;
+
+  /// Filtering options
+  // If True, skip calendar events without field 'provider_event_category_id'.
+  optional bool skip_events_without_provider_event_category_id = 3;
+
+  // If True, skip calendar events without `details`.
+  optional bool skip_events_without_details = 4;
+}
+
+// Report with calendar events.
+message CalendarEventListReport
+{
+  // List of calendar events.
+  repeated CalendarEvent calendar_events = 1;
+
+  // Oldest available and allowed UTC time.
+  // Always provided in first response, provided in updates only if changed.
+  optional google.protobuf.Timestamp oldest_available_utc_timestamp = 2;
+
+  // Latest available and allowed UTC time.
+  // Always provided in first response, provided in updates only if changed.
+  optional google.protobuf.Timestamp latest_available_utc_timestamp = 3;
+}
+
+// Provider of calendar events.
+message CalendarEventProvider
+{
+  // Provider ID.
+  // This is a required field.
+  optional sint32 id = 1;
+
+  // Name.
+  // This is a required field.
+  optional string name = 2;
+
+  // Description.
+  // This is a required field.
+  optional string description = 3;
+
+  // Calendar event provider is deleted (used for updates).
+  optional bool deleted = 4;
+}
+
+// Request list of calendar event providers.
+message CalendarEventProviderListRequest
+{
+}
+
+// Report with a list of calendar event providers.
+message CalendarEventProviderListReport
+{
+  repeated CalendarEventProvider providers = 1;
+}
+
+// Calendar event type.
+message CalendarEventType
+{
+  // Country ID.
+  // Metadata can be obtained via CountryListRequest.
+  optional sint32 country_id = 1;
+
+  // Provider ID.
+  optional sint32 provider_id = 2;
+
+  // Provider event category ID.
+  optional string provider_event_category_id = 3;
+
+  // Provider event detail ID.
+  optional string provider_event_detail_id = 4;
+
+  // Description of an event type category.
+  // This is a required field.
+  optional string category_description = 5;
+
+  // Description of an event type detail.
+  // This is a required field.
+  optional string detail_description = 6;
+
+  // Calendar event type is deleted (used for updates).
+  optional bool deleted = 7;
+}
+
+// Request list of calendar event types.
+message CalendarEventTypeListRequest
+{
+}
+
+// Report with a list of calendar event types.
+message CalendarEventTypeListReport
+{
+  repeated CalendarEventType types = 1;
+}

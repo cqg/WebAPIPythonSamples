@@ -94,7 +94,7 @@ def new_order_request(request_id, account_id, contract_id,
     client.send_client_message(client_msg)
     while True:
         server_msg = client.receive_server_message()
-      	if server_msg.order_statuses is not None:
+        if server_msg.order_statuses is not None:
             for order_statuses in server_msg.order_statuses:
                 # Algo analytics could be found here, is it available or not depends on algo execution,
                 # i.e. it could be available not just from start, but after algo is executing for a while

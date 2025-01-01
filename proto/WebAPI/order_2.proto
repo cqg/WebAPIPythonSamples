@@ -29,6 +29,18 @@ message OrderRequestReject
   optional shared_1.Text details = 4;
 }
 
+// Acknowledgement that CQG trade routing system received and started processing the order request.
+// It is sent only for OrderRequest actions: LiquidateAll, CancelAll, GoFlat.
+// The result of acknowledged GoFlat request will be returned as GoFlatStatus message.
+message OrderRequestAck
+{
+  // ID of the order request this acknowledgement corresponds to.
+  optional uint32 request_id = 1;
+
+  // Time when the order request has been acknowledgement by CQG trade routing system.
+  optional google.protobuf.Timestamp when = 2;
+}
+
 // Status of order.
 message OrderStatus
 {
@@ -197,7 +209,7 @@ message OrderStatus
   // Indicates whether MiFID investment decision identifies a person (false) or algorithm (true)
   optional bool mifid_investment_decision_is_algo = 44;
 
-  // Message originator location (i.e. geographic location and/or desk, trader etc)
+  // Message originator location (i.e. geographic location)
   optional string sender_location_id = 45;
 
   // Message originator identifier (desk, trader etc)
@@ -205,6 +217,9 @@ message OrderStatus
 
   // Applied effective value of message originator identifier
   optional string operator_id = 47;
+
+  // Identifier that is used to match two filled care orders.
+  optional string fill_care_order_request_id = 48;
 }
 
 // Status of a specific transaction.
@@ -218,7 +233,7 @@ message TransactionStatus
   // For all transactions within order chain it is guaranteed that:
   // 1) Transaction identifier is unique.
   // 2) The later transaction has greater transaction identifier than the earlier one.
-  required uint64 trans_id = 2;
+  required uint64 trans_id = 2 [jstype = JS_STRING];
 
   // Transaction time assigned by server (UTC).
   // Note: use trans_utc_timestamp field instead.
@@ -228,7 +243,7 @@ message TransactionStatus
   required google.protobuf.Timestamp trans_utc_timestamp = 40;
 
   // Reference transaction ID to the previous fill transaction for a bust, cancel or correction.
-  optional uint64 ref_trans_id = 4;
+  optional uint64 ref_trans_id = 4 [jstype = JS_STRING];
 
   // If order is modified, this client order ID of the order before modification.
   optional string orig_cl_order_id = 5;
@@ -411,12 +426,6 @@ message TransactionStatus
   // Speculation type of the transaction. One of SpeculationType enum.
   optional uint32 speculation_type = 49;
 
-  // [obsolete] This operation is no longer supported.
-  optional uint32 obsolete_prev_discretionary_offset = 50 [deprecated = true];
-
-  // [obsolete] This operation is no longer supported.
-  optional uint32 obsolete_discretionary_offset = 51 [deprecated = true];
-
   // Commission charged for the fill.
   // CQG trade routing system might not provide this information for some contracts.
   optional Commission fill_commission = 60;
@@ -441,6 +450,23 @@ message TransactionStatus
 
   // Identifier assigned to a trade by a matching system.
   optional string trade_match_id = 66;
+
+  // Identifier that is used to match two filled care orders.
+  optional string fill_care_order_request_id = 68;
+
+  // User who modified or canceled the order, or user on whose behalf the order was modified or canceled.
+  // It is present in the following cases:
+  // 1. For real time events:
+  //    - If transaction status is IN_TRANSIT, SUSPEND or ACTIVEAT;
+  //    - If a trader who initiated this transaction is different from the trader who initiated the previous
+  //      transaction, and if the current transaction has one of the following statuses:
+  //      IN_MODIFY, IN_CANCEL, REJECT_MODIFY, REJECT_CANCEL, or UPDATE (when available).
+  // 2. For past events:
+  //    - If transaction has one of these statuses: IN_TRANSIT, SUSPEND, ACTIVEAT, IN_MODIFY, IN_CANCEL, REJECT_MODIFY,
+  //      REJECT_CANCEL or UPDATE (when available).
+  optional string username = 69;
+
+  reserved 50, 51;
 }
 
 // Trade per specific outright contract.
@@ -507,11 +533,14 @@ message Trade
   // contract identifier of the specific symbol (e.g. the specific instrument mapped to the relative daily
   // future at the moment of this trade).
   optional uint32 specific_contract_id = 18;
+
+  // List of fill extra attributes.
+  repeated shared_1.NamedValue fill_extra_attributes = 19;
 }
 
 message Commission
 {
-  // Commission currency code (ISO 4217 based).
+  // Commission currency code.
   required string commission_currency = 1;
 
   // Commission.
@@ -602,6 +631,10 @@ message Order
 
   enum ExecInstruction
   {
+    // None (this means "plain order without any exec instructions").
+    // This value shall not be explicitly provided in OrderRequest.
+    EXEC_INSTRUCTION_NONE = 12;
+
     // All or None (fill order only completely).
     EXEC_INSTRUCTION_AON = 1;
 
@@ -628,9 +661,6 @@ message Order
     // a pre-existing order.
     EXEC_INSTRUCTION_POSTONLY = 8;
 
-    // [obsolete] This execution instruction is no longer supported.
-    OBSOLETE_EXEC_INSTRUCTION_DISCRETION = 9;
-
     // Market with leftover as Limit (market order then unexecuted quantity becomes limit order at last price).
     EXEC_INSTRUCTION_MTL = 10;
 
@@ -638,9 +668,17 @@ message Order
     // Unmatched auction orders are converted to limit orders on the market open.
     EXEC_INSTRUCTION_AUCTION = 11;
 
-    // None (this means "plain order without any exec instructions").
-    // This value shall not be explicitly provided in OrderRequest.
-    EXEC_INSTRUCTION_NONE = 12;
+    // At Any Price Orders are US-Style Market Orders.
+    EXEC_INSTRUCTION_ATANYPRICE = 13;
+
+    // Limit order with prearranged transaction flag (IntentToCross) set.
+    EXEC_INSTRUCTION_LMT_PRARGD = 14;
+
+    // Internal Cross Only.
+    // This order type is used by OTC to pull up to order size quantity from the exchange on the opposite side.
+    EXEC_INSTRUCTION_ICO = 15;
+
+    reserved 9, 100 to 199;
   }
 
   enum Duration
@@ -688,8 +726,7 @@ message Order
 
   // Specifies what the order is intended to do:
   // open (or extend) a position on the same side as the order or close (or reduce) an opposite position.
-  // Applicable only for contracts with position_tracking
-  // either LONG_SHORT_WITH_IMPLIED_CLOSE or LONG_SHORT_WITH_EXPLICIT_CLOSE.
+  // Applicable only if ContractMetadata.open_close_type is either OPEN_CLOSE_TYPE_OPTIONAL or OPEN_CLOSE_TYPE_REQUIRED.
   enum OpenCloseInstruction
   {
     // Opening a new today position.
@@ -719,9 +756,11 @@ message Order
   // Server side contract Id of the order (see ContractMetadata message).
   required uint32 contract_id = 3;
 
-  // Client order identifier, must be unique within a single trading day for day orders
-  // and across days for multi-day orders.
+  // Client order identifier.
+  // It must be unique within a single trading day for day orders and across days for multi-day orders.
   // Maximum allowed length is 64 bytes.
+  // In OrderStatus messages it contains cl_order_id of the last accepted order request in the order chain,
+  // which may be a cancel request.
   required string cl_order_id = 4;
 
   // Order type.
@@ -784,8 +823,8 @@ message Order
   // True if the order is aggressive (Fixed Income specific order modifier).
   optional bool is_aggressive = 17;
 
-  // Maximum offset between market and limit prices for trail orders.
-  optional sint32 scaled_trail_offset = 18;
+  // Maximum offset between market and limit prices or market and stop prices for trail orders.
+  optional sint64 scaled_trail_offset = 18;
 
   // Trailing peg to follow specific side of the market (for limit orders only).
   // This field is associated with TrailingPeg enum type.
@@ -847,15 +886,11 @@ message Order
   optional strategy_2.StrategyTradingParameters strategy_trading_parameters = 26;
 
   // Specifies what the order is intended to do: open or close (reduce) a position. One of OpenCloseInstruction enum.
-  // Applicable only if ContractMetadata.position_tracking is either
-  // LONG_SHORT_WITH_IMPLIED_CLOSE or LONG_SHORT_WITH_EXPLICIT_CLOSE.
+  // Applicable only if ContractMetadata.open_close_type is either OPEN_CLOSE_TYPE_OPTIONAL or OPEN_CLOSE_TYPE_REQUIRED.
   optional uint32 open_close_instruction = 31;
 
   // Speculation type of the order. One of SpeculationType enum.
   optional uint32 speculation_type = 32;
-
-  // [obsolete] This operation is no longer supported.
-  optional uint32 obsolete_discretionary_offset = 33 [deprecated = true];
 
   // Optional OTC contributor involved into the order processing.
   optional string contributor_id = 40;
@@ -882,6 +917,11 @@ message Order
   // providing additional exchange-specific information via Order.extra_attributes field.
   // See order_2.ExternalAccount.external_account_number and trading_account_2.Account.allow_external_accounts.
   optional string external_account_number = 43;
+
+  // Specifies that the order is Care order.
+  optional bool is_care_order = 44;
+
+  reserved 33;
 }
 
 // MiFID algorithm ID type.
@@ -969,7 +1009,12 @@ message OrderRequest
   // Approve order with ORDER_TYPE_CROSS type.
   optional ApproveOrder approve_order = 22;
 
+  // Fill specific care order.
+  optional FillCareOrder fill_care_order = 28;
+
   // Username of the user on whose behalf the order request is being sent.
+  // Must be a known username in CQG trade routing system,
+  // otherwise the order will be rejected.
   optional string on_behalf_of_user = 7;
 
   // Regulatory Algorithm ID for client algorithm associated with this order, if any.
@@ -1008,10 +1053,15 @@ message OrderRequest
   // True if this is an automated order request, manual (request placed by the user direct action) otherwise.
   optional bool is_automated = 23;
 
-  // Message originator location (i.e. geographic location and/or desk, trader etc)
+  // Message originator location (i.e. geographic location).
+  // Format: "CC[,SS]", CountryCode (ISO 3166-1 alpha 2) and StateCode
+  // (postal abbreviation) when sending country code is "US" or "CA".
+  // Examples: "US,CA", "GB".
   optional string sender_location_id = 26;
 
-  // Message originator identifier (desk, trader etc)
+  // Message originator identifier (desk, trader etc).
+  // It is passed directly to the exchange in the appropriate exchange API field/tag,
+  // often 'Operator ID', 'tag 50', or similar.
   optional string sender_operator_id = 27;
 }
 
@@ -1110,15 +1160,14 @@ message ModifyOrder
   // If specified by the user it's used instead of good_thru_utc_time field.
   optional google.protobuf.Timestamp good_thru_utc_timestamp = 21;
 
-  // [obsolete] This operation is no longer supported.
-  optional uint32 obsolete_discretionary_offset = 22 [deprecated = true];
-
   // List of order extra attributes, can be used to remove or modify existing or add new attributes.
   repeated shared_1.NamedValue extra_attributes = 26;
 
   // FIA Execution Source Code value of the operation.
   // See Order.execution_source_code
   optional string execution_source_code = 27;
+
+  reserved 22;
 }
 
 // Cancel order request.
@@ -1225,6 +1274,9 @@ message ActivateOrder
   // FIA Execution Source Code value of the operation.
   // See Order.execution_source_code.
   optional string execution_source_code = 8;
+
+  // Set to true when the action is initiated by care order auto activation algorithm.
+  optional bool is_care_auto_activation = 9;
 }
 
 // Placement of a compound order.
@@ -1284,6 +1336,9 @@ message CompoundOrder
   // Offset in ticks from loss_tick_offset for stop limit orders (variable ticks size is supported).
   // The offset determines the limit price for stop limit order after the stop price is hit.
   optional sint32 stop_limit_tick_offset = 6;
+
+  // Treat compound order as server-side bracket.
+  optional bool is_bracket = 7;
 }
 
 // Use existing order.
@@ -1382,6 +1437,9 @@ message LiquidateAll
   // FIA Execution Source Code value of the operation.
   // See Order.execution_source_code.
   optional string execution_source_code = 3;
+
+  // Specifies a speculation type. One of SpeculationType enum.
+  optional uint32 speculation_type = 4;
 }
 
 // Cancel all orders (including parked) and liquidate all open positions.
@@ -1396,6 +1454,47 @@ message GoFlat
   // FIA Execution Source Code value of the operation.
   // See Order.execution_source_code.
   optional string execution_source_code = 3;
+
+  // Specifies a speculation type. One of SpeculationType enum.
+  optional uint32 speculation_type = 4;
+
+  // Reserved for internal use.
+  extensions 200;
+}
+
+// Per-account result of GoFlat request execution.
+message GoFlatStatus
+{
+  // ID of the order request this status corresponds to.
+  optional uint32 request_id = 1;
+
+  // Account ID in CQG trade routing system.
+  optional sint32 account_id = 2;
+
+  // Status of GoFlat request execution.
+  enum StatusCode
+  {
+    // GoFlat request execution complete.
+    STATUS_CODE_COMPLETED = 0;
+
+    // GoFlat request was not executed in allowed time.
+    STATUS_CODE_TIMED_OUT = 1;
+
+    // GoFlat request was not executed due to error.
+    STATUS_CODE_FAILED = 2;
+  }
+
+  // This field is associated with StatusCode enum type.
+  optional uint32 status_code = 3;
+
+  // Optional error details message.
+  optional shared_1.Text details = 4;
+
+  // Sum of remaining (unfilled) order quantities among not cancelled orders after GoFlat execution.
+  optional cqg.Decimal remaining_orders_qty = 5;
+
+  // Sum of position quantities among not liquidated open positions after GoFlat execution.
+  optional cqg.Decimal remaining_positions_qty = 6;
 }
 
 // Request of order entitlements.
@@ -1463,10 +1562,7 @@ message OrderEntitlement
 // cross order. This is used when each leg is an independent trade, so submitting the
 // cross order on a recognized strategy symbol is not possible. In this case, the
 // cross order symbol is a exchange-specific placeholder agreed between client and server
-// rather than a tradable symbol. Note: there are several required fields related to
-// placeholder contract like "qty" and "price" in Order, CrossOrderParameters and
-// SideAllocation messages. Client should fill these fields by some acceptable stub data,
-// like qty = "1".
+// rather than a tradable symbol.
 //
 // Possible scenarios:
 // 1) Dual-sided submission (no match process)
@@ -1489,7 +1585,6 @@ message CrossOrderParameters
   repeated SideAllocation side_allocations = 1;
 
   // Price of the cross order (in correct format).
-  // It is required field.
   optional double price = 2;
 
   // Optional ID that can be used to associate the single-sided 
@@ -1506,7 +1601,7 @@ message SideAllocation
   // Identifier of the side allocation record, this field is generated by
   // server.
   // Client should set this field to modify/approve existing side allocation.
-  optional sint64 side_id = 1;
+  optional sint64 side_id = 1 [jstype = JS_STRING];
 
   // Either this or external_account field must be specified.
   optional sint32 account_id = 2;
@@ -1514,13 +1609,14 @@ message SideAllocation
   // Either this or account_id field must be specified.
   optional ExternalAccount external_account = 3;
 
-  // Allocation size.
-  // It is required field.
+  // Allocation size, is only used for some particular scenarios
+  // (like strategies on options for Euronext), in regular scenarios
+  // the attribute is omitted.
   optional cqg.Decimal qty = 4;
 
   // Allocation side.
   // This field is associated with Order.Side enum type.
-  // It is required field.
+  // It is a required field.
   optional uint32 side = 5;
 
   // List of side allocation extra attributes.
@@ -1531,14 +1627,14 @@ message SideAllocation
 message LegAllocation
 {
   // Server side contract Id of the leg (see ContractMetadata message).
-  // It is required field.
+  // It is a required field.
   optional uint32 contract_id = 1;
 
   // Size of the leg.
   optional cqg.Decimal qty = 2;
 
   // Price of the leg (in correct format).
-  // It is required field.
+  // It is a required field.
   optional double price = 3;
 
   // Side of the leg, for exchanges that support LegAllocation as independent
@@ -1584,11 +1680,11 @@ message ExternalAccount
 message ApproveOrder
 {
   // Order id assigned by server after last modification.
-  // It is required field.
+  // It is a required field.
   optional string order_id = 1;
 
   // ID of the order's account.
-  // It is required field.
+  // It is a required field.
   optional sint32 account_id = 2;
 
   enum Action
@@ -1605,29 +1701,111 @@ message ApproveOrder
   optional uint32 action = 3;
 
   // Client side time when an approve order request was submitted (UTC).
-  // It is required field.
+  // It is a required field.
   optional google.protobuf.Timestamp when_utc_timestamp = 4;
 
   // The contra is expected to provide its own side of the cross order in this
   // field.
-  // It is required field.
+  // It is a required field.
   optional SideAllocation side_allocation = 5;
 
   // List of extra attributes.
   repeated shared_1.NamedValue extra_attributes = 6;
 }
 
+// Fill specific care order.
+// This message is sent in order to fill care order without sending it to
+// exchange.
+message FillCareOrder
+{
+  // Execution ID of the fill.
+  // It is a required field.
+  optional string exec_id = 1;
+
+  // Unique id used to identify filled order.
+  optional string fill_care_order_request_id = 2;
+
+  // Price for the fill in correct price format.
+  // It is a required field.
+  optional double fill_price = 3;
+
+  // Quantity to fill for the order.
+  // It is a required field.
+  optional cqg.Decimal fill_qty = 4;
+
+  // Order id being filled. See OrderStatus.order_id.
+  // It is a required field.
+  optional string order_id = 5;
+
+  // ID of the order's account.
+  // It is a required field.
+  optional sint32 account_id = 6;
+
+  // Holds information about fill parameters of spread legs.
+  repeated FillCareOrderLeg order_legs = 7;
+
+  // Holds information about parameters of opposite-side fill.
+  optional FillCareOppositeSide opposite_side = 8;
+}
+
+// Provides fill parameters of native strategy order's leg during FillCareOrder.
+message FillCareOrderLeg
+{
+  // Execution ID of the leg fill.
+  // It is a required field.
+  optional string leg_exec_id = 1;
+
+  // Note: use node_path instead.
+  optional uint32 node_index = 2 [deprecated = true];
+ 
+  // Path in the tree of the strategy from the root to the leg node.
+  // The format is described in the header of strategy_definition_2.StrategyDefinition message.
+  optional string node_path = 5;
+
+  // Price for the leg fill in correct price format.
+  // It is a required field.
+  optional double fill_price = 3;
+
+  // Quantity for the leg fill.
+  // It is a required field.
+  optional cqg.Decimal fill_qty = 4;
+}
+
+// Provides parameters of opposite-side fill during FillCareOrder.
+message FillCareOppositeSide
+{
+  // Execution ID of opposite-side fill.
+  // It is a required field.
+  optional string exec_id = 1;
+
+  // ID of opposite-side care order to fill,
+  // Can be ommitted if create_new_order=true.
+  optional string order_id = 2;
+
+  // Instruction to create a new order for opposite-side fill.
+  optional bool create_new_order = 3;
+
+  // ID of the opposite-side fill's account.
+  // It is a required field.
+  optional sint32 account_id = 4;
+
+  // Holds information about fill parameters of spread legs.
+  repeated FillCareOrderLeg order_legs = 5;
+}
+
 // Allows to get an order status with all transactions.
-// Works for current day and historical orders.
+// Works for current day and historical orders, with
+// the exception of unfilled leg orders of 
+// non-failed synthetic strategy orders.
 message OrderStatusRequest
 {
   // Chain order id from an order status.
   // See OrderStatus.chain_order_id.
-  // It is required field.
+  // It is a required field.
   optional string chain_order_id = 1;
 
   // ID of the order's account.
-  // It is required field.
+  // It is a required field.
   optional sint32 account_id = 2;
 }
 

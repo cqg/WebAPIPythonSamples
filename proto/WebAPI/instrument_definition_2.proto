@@ -9,7 +9,7 @@ import "google/protobuf/timestamp.proto";
 
 // Message describing a user-defined (non-strategy) instrument, e.g. a flex option.
 // Which attributes may be specified, and in what combination, is exchange-specific.
-// Contact CQG for more information about supported exchanges, attributes, and usage conventions.
+// Description of usage conventions can be found in document InstrumentDefinitionConventions_WebAPI.adoc.
 message InstrumentDefinition
 {
   // Symbol of the underlying contract, in exchange-specific format.
