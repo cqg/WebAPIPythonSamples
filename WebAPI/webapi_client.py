@@ -32,7 +32,17 @@ class WebApiClient:
 
     def receive_server_message(self):
         server_msg = ServerMsg()
-        data = self.websocket_client.recvmsg()
+        while True:
+            try:
+                data = self.websocket_client.recvmsg()
+                break
+            except websocket.WebSocketWantReadError:
+                # Only part of a message has been received yet, keep reading
+                continue
+        if data is None:
+            raise ConnectionError(
+                f"Connection closed: {self.websocket_client.close_code} {self.websocket_client.close_reason}"
+            )
         server_msg.ParseFromString(data)
 
         if self._need_to_log:
